@@ -46,9 +46,10 @@ func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, err
 	}
 	var row struct {
 		Visibility string `orm:"visibility"`
+		Status     int    `orm:"status"`
 	}
 	if err := g.DB().Model("hg_content_profile").Safe().Ctx(ctx).
-		Fields("visibility").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
+		Fields("visibility", "status").Where("id", profileID).WhereNull("deleted_at").Scan(&row); err != nil {
 		// A missing or deleted profile is a stale queued job, not a transient
 		// database failure. Let the caller supersede and settle it so the
 		// channel queue can continue.
@@ -57,7 +58,7 @@ func telegramProfilePublishable(ctx context.Context, profileID int64) (bool, err
 		}
 		return false, gerror.Wrap(err, "读取资料发布状态失败")
 	}
-	return strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
+	return row.Status != sysin.ProfileStatusReviewPending && strings.EqualFold(strings.TrimSpace(row.Visibility), "public"), nil
 }
 
 // SendTelegramJob 串行执行目标频道任务，统一账户间隔、发送确认和完成后唤醒。
@@ -300,7 +301,7 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	if err != nil {
 		// 前序查询失败时只退避当前频道任务，不能让 Asynq 高频重试占满
 		// 全局资源；任务保持可恢复状态，其他频道继续发送。
-		if rearmErr := s.postponeTelegramJobForChannelOrder(ctx, targetJob); rearmErr != nil {
+		if rearmErr := s.postponeTelegramChannelJob(ctx, targetJob, 5*time.Second, "频道前序检查失败，等待重试"); rearmErr != nil {
 			return gerror.Wrap(rearmErr, "频道前序检查失败且任务退避失败")
 		}
 		return gerror.Wrap(err, "频道前序检查失败，已退避重试")
@@ -381,6 +382,14 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	defer cancelBudget()
 	ctx = bounded
+	step = beginTelegramPublishStage(ctx, "job.check_operation_before_prepare")
+	checkCtx, cancelCheck := context.WithTimeout(ctx, 2*time.Second)
+	fenceErr := checkProfilePublishOperationBeforePrepare(checkCtx, job)
+	cancelCheck()
+	step.End(fenceErr)
+	if fenceErr != nil {
+		return s.handleTelegramJobError(ctx, job, fenceErr)
+	}
 	step = beginTelegramPublishStage(ctx, "job.can_send")
 	allowed, err := s.canSendTelegramJob(ctx, job)
 	step.End(err, g.Map{"allowed": allowed})

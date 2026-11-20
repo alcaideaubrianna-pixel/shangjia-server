@@ -32,11 +32,14 @@ func (s *sSysBot) handleAccountManagementInput(ctx context.Context, botID int64,
 	if session == nil || (session.Scene != "account_create" && session.Scene != "account_setting" && session.Scene != "account_renewal" && session.Scene != "account_authorize") {
 		return false, nil
 	}
+	if session.Scene == "account_authorize" {
+		if !s.accountAuthorizationEnabled(ctx) {
+			return true, s.reply(ctx, botID, fmt.Sprint(msg.Chat.ID), "账户管理当前未启用。")
+		}
+		return true, s.accountAuthorizationInput(ctx, botID, msg, session)
+	}
 	if _, enabled := s.featureConfig(ctx, accountManagementFeature{}.Key()); !enabled {
 		return true, s.reply(ctx, botID, fmt.Sprint(msg.Chat.ID), "账户管理当前未启用。")
-	}
-	if session.Scene == "account_authorize" {
-		return true, s.accountAuthorizationInput(ctx, botID, msg, session)
 	}
 	chatID := fmt.Sprint(msg.Chat.ID)
 	account, err := s.boundProfileAccountByUser(ctx, msg.From.ID)

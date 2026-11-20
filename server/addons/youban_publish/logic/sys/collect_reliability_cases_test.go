@@ -10,7 +10,6 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/hibiken/asynq"
-	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
 // Production metadata only: two enabled source-78 events were media_pending

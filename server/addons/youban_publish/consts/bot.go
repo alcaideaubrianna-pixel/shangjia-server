@@ -10,9 +10,17 @@ const (
 	PublishBotTypeTwoWay = "two_way"
 )
 
+const (
+	PublishBotRoleUnassigned = iota
+	PublishBotRoleCollector
+	PublishBotRoleRelay
+	PublishBotRoleUploader
+)
+
 var PublishBotTypeOptions = []*model.Option{
 	dict.GenDefaultOption(PublishBotTypeNormal, "普通机器人"),
 	dict.GenInfoOption(PublishBotTypeTwoWay, "双向机器人"),
+	dict.GenPrimaryOption("uploader", "上架机器人"),
 }
 
 func init() {

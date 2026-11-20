@@ -68,11 +68,31 @@ func lockProfilePublishFenceTx(ctx context.Context, tx gdb.TX, job telegramJobRe
 	if err != nil {
 		return err
 	}
+	return checkProfilePublishOperationState(job, state)
+}
+
+func checkProfilePublishOperationState(job telegramJobRecord, state gdb.Record) error {
 	if !state.IsEmpty() && (state["publish_operation_no"].String() != job.OperationNo ||
 		state["publish_task_status"].String() == "canceling" || state["publish_task_status"].String() == "canceled") {
 		return errTelegramJobSuperseded
 	}
 	return nil
+}
+
+func checkProfilePublishOperationBeforePrepare(ctx context.Context, job telegramJobRecord) error {
+	if !profilePublishCancelEnabled() || job.ProfileId <= 0 || job.OperationNo == "" ||
+		strings.HasPrefix(job.OperationNo, "full_push:") {
+		return nil
+	}
+	// This is an early rejection only. The Attempt transaction still locks
+	// and checks the operation state before any Telegram send can begin.
+	state, err := g.DB().Model(publishProfileStateTable).Safe().Ctx(ctx).Master().
+		Where("tenant_id", job.TenantId).Where("account_id", job.AccountId).
+		Where("profile_id", job.ProfileId).Fields("publish_operation_no,publish_task_status").One()
+	if err != nil {
+		return err
+	}
+	return checkProfilePublishOperationState(job, state)
 }
 
 func (s *sSysPublish) AdminProfilePublishCancel(ctx context.Context, in *sysin.ProfilePublishCancelInp) (*sysin.ProfileTaskStatusModel, error) {

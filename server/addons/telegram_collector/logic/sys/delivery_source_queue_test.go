@@ -122,6 +122,20 @@ func TestDeliverySourceSettlement(t *testing.T) {
 	}
 }
 
+func TestDeliverySourceReschedulesBeforeDatabaseDueTime(t *testing.T) {
+	q := &deliverySourceFakeQueue{}
+	claim := deliverySourceTestClaim(t, sourcequeue.Realtime)
+	dueAt := time.Now().Add(time.Minute)
+	err := executeDeliverySourceClaim(context.Background(), q, claim, claim.Lane, time.Second,
+		func(context.Context, int64, ...time.Time) error { return &deliveryNotDueError{at: dueAt} })
+	if err != nil || q.acked != 0 || q.nacked != 1 || q.token != claim.Token {
+		t.Fatalf("settlement=%+v err=%v", q, err)
+	}
+	if q.delay < 55*time.Second || q.delay > time.Minute {
+		t.Fatalf("delay=%v, want retry at database due time", q.delay)
+	}
+}
+
 func TestDeliverySourceRenewFailureCancelsWithoutSettlement(t *testing.T) {
 	for _, cause := range []error{sourcequeue.ErrLeaseLost, errors.New("Redis unavailable")} {
 		q := &deliverySourceFakeQueue{renewErr: cause}

@@ -388,6 +388,7 @@ type AccountSettingModel struct {
 }
 
 type AccountCapabilityModel struct {
+	ParentId                 int64  `json:"-"`
 	AccountId                int64  `json:"accountId" dc:"账号ID"`
 	TenantId                 int64  `json:"tenantId" dc:"租户ID"`
 	AccountType              string `json:"accountType" dc:"账号类型"`
@@ -606,7 +607,8 @@ type BotMediaCacheFileModel struct {
 }
 
 type ProfileListInp struct {
-	PushChannelId int64 `json:"pushChannelId" dc:"推送目标频道ID"`
+	IncludePendingReview bool  `json:"-"`
+	PushChannelId        int64 `json:"pushChannelId" dc:"推送目标频道ID"`
 	form.PageReq
 	TenantId            int64  `json:"tenantId" dc:"租户ID"`
 	AccountId           int64  `json:"accountId" dc:"上架账号ID"`
@@ -631,7 +633,8 @@ type ProfileViewInp struct {
 
 type AdminProfilePublishInp struct {
 	ProfileViewInp
-	BatchId string `json:"batchId" dc:"批量操作ID"`
+	ApproveReview bool   `json:"approveReview" dc:"仅通过待审核申请"`
+	BatchId       string `json:"batchId" dc:"批量操作ID"`
 }
 
 type AdminProfileBatchCancelInp struct {
@@ -800,6 +803,7 @@ type BotMediaSearchProgress struct {
 }
 
 type ProfileSaveInp struct {
+	EditPendingReview bool                      `json:"editPendingReview" dc:"仅编辑待审核资料"`
 	RandomMedia       *ProfileRandomMediaPolicy `json:"randomMedia,omitempty"`
 	DiagnosticTraceId string                    `json:"-"`
 
@@ -1391,27 +1395,33 @@ type BotChannelCacheModel struct {
 }
 
 type BotModel struct {
-	BotType     string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
-	Id          int64       `json:"id" dc:"ID"`
-	TenantId    int64       `json:"tenantId" dc:"租户ID，0表示全局"`
-	BotName     string      `json:"botName" dc:"Bot名称"`
-	BotUsername string      `json:"botUsername" dc:"Bot用户名"`
-	BotToken    string      `json:"botToken" dc:"Bot Token"`
-	Remark      string      `json:"remark" dc:"备注"`
-	Status      int         `json:"status" dc:"状态"`
-	CreatedAt   *gtime.Time `json:"createdAt" dc:"创建时间"`
-	UpdatedAt   *gtime.Time `json:"updatedAt" dc:"更新时间"`
+	RequirePublishReview bool        `json:"requirePublishReview"`
+	Role                 int         `json:"role" dc:"0未分配 1采集 2双向 3上架"`
+	RequireRegistration  bool        `json:"requireRegistration" dc:"上架机器人需要授权登录"`
+	BotType              string      `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
+	Id                   int64       `json:"id" dc:"ID"`
+	TenantId             int64       `json:"tenantId" dc:"租户ID，0表示全局"`
+	BotName              string      `json:"botName" dc:"Bot名称"`
+	BotUsername          string      `json:"botUsername" dc:"Bot用户名"`
+	BotToken             string      `json:"botToken" dc:"Bot Token"`
+	Remark               string      `json:"remark" dc:"备注"`
+	Status               int         `json:"status" dc:"状态"`
+	CreatedAt            *gtime.Time `json:"createdAt" dc:"创建时间"`
+	UpdatedAt            *gtime.Time `json:"updatedAt" dc:"更新时间"`
 }
 
 type BotSaveInp struct {
-	BotType     string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
-	Id          int64  `json:"id" dc:"ID"`
-	TenantId    int64  `json:"tenantId" dc:"租户ID，0表示全局"`
-	BotName     string `json:"botName" dc:"Bot名称"`
-	BotUsername string `json:"botUsername" dc:"Bot用户名"`
-	BotToken    string `json:"botToken" dc:"Bot Token"`
-	Remark      string `json:"remark" dc:"备注"`
-	Status      int    `json:"status" dc:"状态：1启用 2停用"`
+	RequirePublishReview *bool  `json:"requirePublishReview"`
+	Role                 *int   `json:"role" dc:"0未分配 1采集 2双向 3上架"`
+	RequireRegistration  *bool  `json:"requireRegistration" dc:"上架机器人需要授权登录"`
+	BotType              string `json:"botType" dc:"Bot用途：normal普通机器人，two_way双向机器人"`
+	Id                   int64  `json:"id" dc:"ID"`
+	TenantId             int64  `json:"tenantId" dc:"租户ID，0表示全局"`
+	BotName              string `json:"botName" dc:"Bot名称"`
+	BotUsername          string `json:"botUsername" dc:"Bot用户名"`
+	BotToken             string `json:"botToken" dc:"Bot Token"`
+	Remark               string `json:"remark" dc:"备注"`
+	Status               int    `json:"status" dc:"状态：1启用 2停用"`
 }
 
 type BotCreateInp struct {

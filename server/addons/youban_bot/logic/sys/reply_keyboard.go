@@ -22,10 +22,15 @@ const replyKeyboardSilentText = "\u2063"
 
 func (s *sSysBot) ensureReplyKeyboardCurrent(ctx context.Context, botId int64, chatId string) error {
 	telegramUserId := telegramUserIdFromCtx(ctx)
-	if telegramUserId == "" || botId <= 0 || strings.TrimSpace(chatId) == "" {
+	if telegramUserId == "" || botId == 0 || strings.TrimSpace(chatId) == "" {
 		return nil
 	}
-	markup := replyKeyboardMarkupOrRemove(s.replyKeyboard(ctx))
+	var markup models.ReplyMarkup
+	if state := collectorInteractionFromContext(ctx); state != nil {
+		markup = replyKeyboardMarkupOrRemove(state.keyboard)
+	} else {
+		markup = replyKeyboardMarkupOrRemove(s.replyKeyboard(ctx))
+	}
 	version := replyKeyboardDeliveryVersion(markup)
 	userKey := replyKeyboardUserVersionKey(botId, telegramUserId)
 	value, cacheErr := cache.Instance().Get(ctx, userKey)
@@ -36,7 +41,16 @@ func (s *sSysBot) ensureReplyKeyboardCurrent(ctx context.Context, botId int64, c
 }
 
 func (s *sSysBot) refreshReplyKeyboardSilently(ctx context.Context, botId int64, chatId string, replyMarkup models.ReplyMarkup) error {
-	botToken := s.replyBotToken(ctx, botId)
+	var botToken string
+	if botId < 0 {
+		row, err := s.profileBotById(ctx, botId)
+		if err != nil {
+			return err
+		}
+		botToken = row.BotToken
+	} else {
+		botToken = s.replyBotToken(ctx, botId)
+	}
 	if botToken == "" {
 		return nil
 	}
@@ -60,7 +74,7 @@ func (s *sSysBot) markReplyKeyboardDelivered(ctx context.Context, botId int64, r
 		return
 	}
 	telegramUserId := telegramUserIdFromCtx(ctx)
-	if telegramUserId == "" || botId <= 0 {
+	if telegramUserId == "" || botId == 0 {
 		return
 	}
 	version := replyKeyboardDeliveryVersion(replyMarkup)
@@ -230,4 +244,30 @@ func normalizeReplyKeyboardMarkup(markup models.ReplyMarkup) models.ReplyMarkup 
 		return replyKeyboardMarkupOrRemove(keyboard)
 	}
 	return markup
+}
+
+func collectorReplyKeyboard(waitingRegistration bool) *models.ReplyKeyboardMarkup {
+	buttons := []models.KeyboardButton{{Text: "上架资料"}, {Text: "资料管理"}}
+	if waitingRegistration {
+		buttons = []models.KeyboardButton{{Text: "注册申请"}}
+	}
+	return &models.ReplyKeyboardMarkup{
+		Keyboard:       [][]models.KeyboardButton{buttons},
+		IsPersistent:   true,
+		ResizeKeyboard: true,
+	}
+}
+
+func (s *sSysBot) sendCollectorReply(ctx context.Context, botID int64, chatID, text string) error {
+	var markup models.ReplyMarkup
+	if state := collectorInteractionFromContext(ctx); state != nil && state.keyboard != nil {
+		markup = state.keyboard
+	}
+	row, err := s.profileBotById(ctx, botID)
+	if err != nil {
+		return err
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatID, text, "HTML", false, markup)
+	s.trackReplyResult(ctx, botID, markup, err)
+	return err
 }

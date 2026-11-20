@@ -596,7 +596,9 @@ func (s *sSysPublish) applyProfileNonKeywordFilters(ctx context.Context, mod *gd
 	if in.Visibility != "" {
 		mod = mod.Where("p.visibility", strings.TrimSpace(in.Visibility))
 	}
-	if in.Status > 0 {
+	if in.Status == 2 && in.IncludePendingReview {
+		mod = mod.WhereIn("p.status", []int{2, sysin.ProfileStatusReviewPending})
+	} else if in.Status > 0 {
 		mod = mod.Where("p.status", in.Status)
 	}
 	if in.CollectSourceId > 0 {

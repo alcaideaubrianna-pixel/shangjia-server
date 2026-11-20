@@ -242,6 +242,7 @@ func claimTelegramChannelJob(ctx context.Context, channelID int64) (telegramChan
 	const script = `if redis.call('EXISTS',KEYS[4])==1 then return {} end
  local t=redis.call('TIME'); local now=t[1]*1000+math.floor(t[2]/1000)
  local owner=redis.call('GET',KEYS[7])
+ if owner and redis.call('PTTL',KEYS[7])==-1 then redis.call('PEXPIRE',KEYS[7],ARGV[3]) end
  local ownerLane=0
  if owner then
  for i=1,3 do if redis.call('ZSCORE',KEYS[i],owner) then ownerLane=i; break end end
@@ -251,7 +252,17 @@ func claimTelegramChannelJob(ctx context.Context, channelID int64) (telegramChan
  if ownerLane==i then v={owner,redis.call('ZSCORE',KEYS[i],owner)}
  elseif ownerLane==0 and i==1 then v={owner,tostring(now)}
  else v={} end
- else v=redis.call('ZRANGE',KEYS[i],0,0,'WITHSCORES') end
+ else
+ v={}
+ for rank=0,4 do
+ local base=rank*2000000000000
+ v=redis.call('ZRANGEBYSCORE',KEYS[i],base,base+now,'WITHSCORES','LIMIT',0,1)
+ if #v>0 then break end
+ end
+ if #v==0 then
+ v=redis.call('ZRANGEBYSCORE',KEYS[i],10000000000000,'+inf','WITHSCORES','LIMIT',0,1)
+ end
+ end
  if #v>0 and tonumber(v[2])%2000000000000<=now then
  redis.call('ZREM',KEYS[i],v[1]); local deadline=now+tonumber(ARGV[3])
  redis.call('HSET',KEYS[4],'token',ARGV[1],'job',v[1],'lane',KEYS[i],'score',v[2],'deadline',deadline)
@@ -296,7 +307,7 @@ func settleTelegramChannelClaim(ctx context.Context, claim telegramChannelQueueC
  if redis.call('HGET',KEYS[4],'token')~=ARGV[1] or tonumber(redis.call('HGET',KEYS[4],'deadline') or '0')<=now then return 0 end
  if ARGV[6]=='1' then
  local owner=redis.call('GET',KEYS[8]); if owner and owner~=ARGV[2] then return 0 end
- redis.call('SET',KEYS[8],ARGV[2])
+ redis.call('SET',KEYS[8],ARGV[2],'PX',ARGV[7])
  elseif ARGV[3]=='0' and redis.call('GET',KEYS[8])==ARGV[2] then redis.call('DEL',KEYS[8]) end
  if ARGV[3]=='1' and not redis.call('ZSCORE',KEYS[1],ARGV[2]) and not redis.call('ZSCORE',KEYS[2],ARGV[2]) and not redis.call('ZSCORE',KEYS[3],ARGV[2]) then
  local score=tonumber(ARGV[4])
@@ -312,7 +323,7 @@ func settleTelegramChannelClaim(ctx context.Context, claim telegramChannelQueueC
 		preserve = "1"
 	}
 	fields["preserveOrder"] = claim.PreserveOrder
-	value, err := telegramChannelRedisDo(ctx, "EVAL", script, 8, telegramChannelUrgentQueueKey(claim.ChannelID), telegramChannelQueueKey(claim.ChannelID), telegramChannelHistoryQueueKey(claim.ChannelID), telegramChannelProcessingKey(claim.ChannelID), telegramChannelProcessingDueKey, telegramChannelActiveSetKey, telegramChannelQueueKeyForPriority(claim.ChannelID, priority), telegramChannelOrderOwnerKey(claim.ChannelID), claim.Token, strconv.FormatInt(claim.JobID, 10), mode, telegramChannelQueueScore(priority, at, claim.JobID), strconv.FormatInt(claim.ChannelID, 10), preserve)
+	value, err := telegramChannelRedisDo(ctx, "EVAL", script, 8, telegramChannelUrgentQueueKey(claim.ChannelID), telegramChannelQueueKey(claim.ChannelID), telegramChannelHistoryQueueKey(claim.ChannelID), telegramChannelProcessingKey(claim.ChannelID), telegramChannelProcessingDueKey, telegramChannelActiveSetKey, telegramChannelQueueKeyForPriority(claim.ChannelID, priority), telegramChannelOrderOwnerKey(claim.ChannelID), claim.Token, strconv.FormatInt(claim.JobID, 10), mode, telegramChannelQueueScore(priority, at, claim.JobID), strconv.FormatInt(claim.ChannelID, 10), preserve, telegramChannelClaimTTL.Milliseconds())
 	fields["durationMs"] = time.Since(startedAt).Milliseconds()
 	if err != nil {
 		fields["reason"] = "redis_error"

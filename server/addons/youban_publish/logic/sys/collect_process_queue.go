@@ -604,8 +604,7 @@ func collectProcessResumeClassifiedDisplay(ctx context.Context, event gdb.Record
 	}
 }
 
-// hasCollectProcessPairedVerify probes the existing material index prefix.
-// Never search all parents by parent ID alone or infer a new verification pair.
+// hasCollectProcessPairedVerify checks an existing binding within the event's source scope.
 func hasCollectProcessPairedVerify(ctx context.Context, event gdb.Record) (bool, error) {
 	chatIDs := tgChannelCacheLookupIds(event["source_chat_id"].String())
 	if event["id"].Int64() <= 0 || event["tenant_id"].Int64() <= 0 ||
@@ -619,6 +618,19 @@ func hasCollectProcessPairedVerify(ctx context.Context, event gdb.Record) (bool,
 		defer tx.Ctx(parentCtx)
 	}
 	cols := pdao.YoubanPublishCollectEvent.Columns()
+	if strings.EqualFold(g.DB().GetConfig().Type, "pgsql") {
+		// LIMIT alone can lead PostgreSQL to scan the chat's queue index and
+		// filter out unrelated parents. Read the bound children first.
+		scopeColumns := strings.Join([]string{cols.TenantId, cols.AccountId, cols.SourceId, cols.SourceChatId}, ",")
+		query := "WITH paired AS MATERIALIZED (SELECT " + cols.Id + "," + scopeColumns +
+			" FROM " + pdao.YoubanPublishCollectEvent.Table() +
+			" WHERE material_role=? AND material_parent_event_id=?)" +
+			" SELECT " + cols.Id + " FROM paired WHERE " + cols.TenantId + "=? AND " + cols.AccountId +
+			"=? AND " + cols.SourceId + "=? AND " + cols.SourceChatId + " IN (?) LIMIT 1"
+		row, err := g.DB().GetOne(ctx, query, collectMaterialRoleVerify, event[cols.Id].Int64(),
+			event[cols.TenantId].Int64(), collectEventStorageAccountID(event), event[cols.SourceId].Int64(), chatIDs)
+		return !row.IsEmpty(), err
+	}
 	row, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).Fields(cols.Id).
 		Where(cols.TenantId, event["tenant_id"].Int64()).
 		Where(cols.AccountId, collectEventStorageAccountID(event)).
@@ -681,7 +693,18 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		if !collectProcessEventMatchesPayload(event, payload) {
 			return 0, false, false, gerror.New("采集事件与任务归属不一致")
 		}
+		if cooldownErr := collectEventConfigurationCooldown(ctx, event); cooldownErr != nil {
+			var retry *collectProcessRetryError
+			if errors.As(cooldownErr, &retry) {
+				return retry.delay, true, false, nil
+			}
+			return 0, false, false, cooldownErr
+		}
 		ctx = bindCollectEventObservation(ctx, event)
+		if collectEventTerminalProcessingFailure(event) {
+			attemptResult = collectPipelineFailed
+			return 0, false, true, nil
+		}
 		lateVerificationRepair := collectMaterialLateVerificationRepairCandidate(event)
 		if collectProcessEventFinished(event) {
 			if !lateVerificationRepair {
@@ -889,4 +912,19 @@ func collectMaterialLateVerificationRepairCandidate(event gdb.Record) bool {
 	return event["material_role"].String() == collectMaterialRoleDisplay &&
 		event["material_group_status"].String() == "paired" &&
 		(event["status"].String() == sysin.CollectEventStatusProcessed || event["status"].String() == sysin.CollectEventStatusDispatched)
+}
+
+// Media updates reopen the event through collectReplayUpdateFields. Repeated
+// durable wakeups alone must not reopen an unchanged rejected material group.
+func collectEventTerminalProcessingFailure(event gdb.Record) bool {
+	if event["status"].String() != sysin.CollectEventStatusFailed {
+		return false
+	}
+	message := event["error_message"].String()
+	for _, marker := range collectProcessingTerminalMessages {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }

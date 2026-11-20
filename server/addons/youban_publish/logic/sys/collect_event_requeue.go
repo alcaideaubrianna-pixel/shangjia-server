@@ -80,6 +80,9 @@ func (s *sSysPublish) completeTargetCollectEvent(ctx context.Context, payload co
 	if err != nil {
 		return err
 	}
+	// The scoped maintenance entry is authorized above. It may explicitly
+	// recheck repaired configuration without waiting for an automatic cooldown.
+	ctx = context.WithValue(ctx, collectManualReplayContextKey{}, payload.EventId)
 	if restored {
 		// prepare has committed both the ignored events and canceled media.
 		// Do not spend the HTTP/MCP deadline downloading media: the ordinary

@@ -499,6 +499,9 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 	if in == nil || (in.Id <= 0 && normalizeProfileUUID(in.Uuid) == "") {
 		return nil, gerror.New("资料UUID不能为空")
 	}
+	if in.EditPendingReview && in.AsyncSubmit {
+		return nil, gerror.New("待审核资料必须同步保存")
+	}
 	if in.AsyncSubmit {
 		return s.enqueueProfileSubmit(ctx, in, account.TenantId, account.Id)
 	}
@@ -516,6 +519,7 @@ func (s *sSysPublish) AdminProfileEdit(ctx context.Context, in *sysin.ProfileSav
 		return nil, gerror.New("资料归属账号不存在")
 	}
 	in.KeepPublishState = true
+	ctx = context.WithValue(ctx, pendingProfileEditorKey{}, account.Id)
 	return s.saveProfile(ctx, in, account.TenantId, ownerAccountId)
 }
 
@@ -577,6 +581,7 @@ func (s *sSysPublish) AdminNoteList(ctx context.Context, in *sysin.NoteListInp) 
 	if in == nil {
 		in = &sysin.NoteListInp{}
 	}
+	in.IncludePendingReview = true
 	scope, err := s.adminProfileVisibleScope(ctx, account, &in.ProfileListInp)
 	if err != nil {
 		return nil, err
@@ -752,7 +757,7 @@ func (s *sSysPublish) ServerProfileReview(ctx context.Context, in *sysin.Profile
 		return gerror.New("资料不存在或无权操作")
 	}
 	columns := dao.ContentProfile.Columns()
-	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).Data(g.Map{
+	if _, err = dao.ContentProfile.Ctx(ctx).WhereIn(columns.Id, ids).WhereNot(columns.Status, sysin.ProfileStatusReviewPending).Data(g.Map{
 		columns.ReviewStatus: in.ReviewStatus,
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "审核资料失败")

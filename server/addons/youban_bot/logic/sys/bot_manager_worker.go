@@ -576,10 +576,14 @@ func (s *sSysBot) managerTick(ctx context.Context) error {
 func (s *sSysBot) managerNotifyCompleted(ctx context.Context) error {
 	c := dao.YoubanBotManagerTask.Columns()
 	table := dao.YoubanBotManagerTask.Table()
-	firstInBatch := fmt.Sprintf("%s IN (SELECT MIN(%s) FROM %s WHERE %s=0 GROUP BY %s)", c.Id, c.Id, table, c.Notified, c.BatchKey)
+	// The existing (batch_key,id) index can check the head of each batch
+	// without aggregating all unnotified batches on every tick.
+	firstInBatch := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s earlier WHERE earlier.%s=%s.%s AND earlier.%s<%s.%s AND earlier.%s=0)",
+		table, c.BatchKey, table, c.BatchKey, c.Id, table, c.Id, c.Notified)
+	ready := fmt.Sprintf("%s=0 AND %s IN ('success','failed')", c.Notified, c.Status)
 	noActive := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s active WHERE active.%s=%s.%s AND active.%s IN ('pending','submitted'))", table, c.BatchKey, table, c.BatchKey, c.Status)
 	var roots []*entity.YoubanBotManagerTask
-	if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(c.Notified, 0).WhereIn(c.Status, []string{"success", "failed"}).Where(firstInBatch).Where(noActive).OrderAsc(c.UpdatedAt).OrderAsc(c.Id).Limit(20).Scan(&roots); err != nil {
+	if err := dao.YoubanBotManagerTask.Ctx(ctx).Where(ready).Where(firstInBatch).Where(noActive).OrderAsc(c.UpdatedAt).OrderAsc(c.Id).Limit(20).Scan(&roots); err != nil {
 		return err
 	}
 	for _, root := range roots {

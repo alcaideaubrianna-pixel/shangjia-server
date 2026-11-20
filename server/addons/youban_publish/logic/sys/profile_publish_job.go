@@ -51,7 +51,7 @@ func (s *sSysPublish) profilePublishSource(ctx context.Context, profileId, tenan
 	if strings.EqualFold(strings.TrimSpace(row["publish_task_status"].String()), "unpublishing") {
 		return nil, errPublishProfileUnavailable
 	}
-	if requireOnline && (row["status"].Int() != 1 || row["visibility"].String() != consts.ContentVisibilityPublic) {
+	if row["status"].Int() == sysin.ProfileStatusReviewPending || requireOnline && (row["status"].Int() != 1 || row["visibility"].String() != consts.ContentVisibilityPublic) {
 		return nil, errPublishProfileUnavailable
 	}
 	return row, nil
@@ -81,6 +81,11 @@ func profilePublishPreparationError(channelCount int, jobIds []int64) error {
 }
 
 func (s *sSysPublish) submitProfilePublishWithMeta(ctx context.Context, profileId, tenantId, accountId, operatorId int64, operationNo string, channelIds []int64, requireOnline bool, meta telegramProfilePublishMeta) error {
+	if profileId > 0 {
+		if err := checkProfileReviewPublishable(ctx, profileId); err != nil {
+			return err
+		}
+	}
 	startedAt := time.Now()
 	g.Log().Info(ctx, "资料发布准备开始", g.Map{
 		"event":         "publish_prepare_start",
@@ -337,6 +342,18 @@ func (s *sSysPublish) prepareProfilePublishJobs(ctx context.Context, profileId, 
 		jobIds = jobIds[:0]
 	}
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		scope, err := tx.Model(publishProfileStateTable).Where("profile_id", profileId).
+			Where("tenant_id", source["tenant_id"].Int64()).Where("account_id", source["account_id"].Int64()).
+			WhereNull("deleted_at").Fields("profile_id").LockUpdate().One()
+		if err != nil {
+			return err
+		}
+		if scope.IsEmpty() {
+			return errPublishProfileUnavailable
+		}
+		if err = checkProfileReviewPublishable(ctx, profileId); err != nil {
+			return err
+		}
 		if strings.HasPrefix(operationNo, "full_push:") {
 			if len(channels) != 1 {
 				return gerror.New("全量推送目标频道不完整")

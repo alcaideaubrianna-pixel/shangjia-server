@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,18 +19,88 @@ import (
 func (s *sSysPublish) maintainPermissionPausedBacklog(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	// Retention must still progress when cancelling a large historical backlog.
-	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		return prunePermissionCancelledJobsTx(ctx, tx, gtime.New(time.Now().AddDate(0, -1, 0)))
+	// Low-priority retention must not exhaust the budget for current permission scopes.
+	retentionErr := s.prunePermissionCancelledJobs(ctx)
+	return errors.Join(retentionErr, s.scanPermissionBacklogScopes(ctx))
+}
+
+type permissionRetentionCursor struct {
+	UpdatedAt string `json:"updatedAt"`
+	ID        int64  `json:"id"`
+}
+
+// Called under the existing recovery lease. Advance only after the transaction commits.
+func (s *sSysPublish) prunePermissionCancelledJobs(ctx context.Context) error {
+	if !cache.Initialized() {
+		return nil
+	}
+	admitted, err := cache.Instance().SetIfNotExist(ctx, publishconsts.PermissionRetentionProbeKey, true, time.Minute)
+	if err != nil || !admitted {
+		return err
+	}
+	value, err := cache.Instance().Get(ctx, publishconsts.PermissionRetentionCursorKey)
+	if err != nil {
+		return err
+	}
+	var cursor permissionRetentionCursor
+	if !value.IsNil() {
+		if err := value.Struct(&cursor); err != nil {
+			return err
+		}
+	}
+	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := g.DB().Transaction(bounded, func(ctx context.Context, tx gdb.TX) error {
+		return prunePermissionCancelledJobsTx(ctx, tx, gtime.New(time.Now().AddDate(0, -1, 0)), &cursor)
 	}); err != nil {
 		return err
 	}
-	return s.scanPermissionBacklogScopes(ctx)
+	if err := cache.Instance().Set(ctx, publishconsts.PermissionRetentionCursorKey, cursor, 24*time.Hour); err != nil {
+		return err
+	}
+	if cursor.ID == 0 {
+		// Empty/end-of-pass probes do not need to scan historical jobs every recovery tick.
+		return cache.Instance().Set(ctx, publishconsts.PermissionRetentionProbeKey, true, 10*time.Minute)
+	}
+	return nil
 }
 
-func prunePermissionCancelledJobsTx(ctx context.Context, tx gdb.TX, cutoff *gtime.Time) error {
+func prunePermissionCancelledJobsTx(ctx context.Context, tx gdb.TX, cutoff *gtime.Time, cursors ...*permissionRetentionCursor) error {
+	// First use the retention index to obtain at most 200 IDs. Correlated evidence
+	// checks and row locks only run on that bounded page; ineligible rows cannot
+	// monopolize every pass because the committed cursor moves past them.
+	var candidates []struct {
+		ID        int64       `orm:"id"`
+		UpdatedAt *gtime.Time `orm:"updated_at"`
+	}
+	model := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Fields("id,updated_at").
+		Where("status", telegramJobStatusSuperseded).Where("last_dispatch_error", channelPermissionCancelledMessage).
+		Where("updated_at <= ?", cutoff)
+	if len(cursors) > 0 && cursors[0] != nil && cursors[0].UpdatedAt != "" && cursors[0].ID > 0 {
+		model = model.Where("(updated_at,id) > (?,?)", cursors[0].UpdatedAt, cursors[0].ID)
+	}
+	if err := model.OrderAsc("updated_at").OrderAsc("id").Limit(200).Scan(&candidates); err != nil {
+		return err
+	}
+	if len(candidates) == 0 {
+		if len(cursors) > 0 && cursors[0] != nil {
+			*cursors[0] = permissionRetentionCursor{}
+		}
+		return nil
+	}
+	pageIDs := make([]int64, 0, len(candidates))
+	for _, row := range candidates {
+		pageIDs = append(pageIDs, row.ID)
+	}
+	defer func() {
+		if len(cursors) > 0 && cursors[0] != nil {
+			last := candidates[len(candidates)-1]
+			*cursors[0] = permissionRetentionCursor{ID: last.ID, UpdatedAt: last.UpdatedAt.Time.Format("2006-01-02 15:04:05.000000")}
+		}
+	}()
 	var jobs []telegramJobRecord
 	if err := tx.Model(publishTgJobTable).Safe().Ctx(ctx).Fields("id").
+		WhereIn("id", pageIDs).
 		Where("status", telegramJobStatusSuperseded).Where("last_dispatch_error", channelPermissionCancelledMessage).
 		Where("updated_at <= ?", cutoff).Where(permissionUntouchedJobSQL()).
 		OrderAsc("updated_at").OrderAsc("id").Limit(200).LockUpdate().Scan(&jobs); err != nil {

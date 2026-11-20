@@ -138,7 +138,6 @@ func (s *sSysPublish) applyTelegramJobContentProtection(ctx context.Context, job
 				item.AntiScanMode = policy.AntiScanMode
 				item.AntiScanBackgroundURL = policy.AntiScanBackgroundURL
 				item.AntiScanProvider = provider
-				item.ProcessedAssetHash = telegramProcessedAssetVariantHash(item)
 				item.TenantId = job.TenantId
 				item.AccountId = job.AccountId
 				item.JobId = job.Id

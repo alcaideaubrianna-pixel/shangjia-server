@@ -55,6 +55,12 @@ func (s *sSysPublish) AdminProfilePublish(ctx context.Context, in *sysin.AdminPr
 	if view == nil || view.Profile == nil {
 		return gerror.New("资料不存在或无权操作")
 	}
+	if view.Profile.Status == sysin.ProfileStatusReviewPending {
+		return s.approvePendingProfileFromAdmin(ctx, view.Profile, account.Id)
+	}
+	if in.ApproveReview {
+		return gerror.New("资料审核状态已变化，请刷新后重试")
+	}
 	claimed, err := claimProfileOperation(ctx, view.Profile.TenantId, view.Profile.Id, profileOperationPublish)
 	if err != nil {
 		return err

@@ -63,8 +63,8 @@ func telegramChannelPendingCleanupSQL(alias string) string {
 	if alias != "" {
 		p = strings.TrimSuffix(alias, ".") + "."
 	}
-	// A terminal failure may retain the audit phase of a failed pre-send
-	// cleanup. Only an explicit compensation marker keeps its channel fence.
+	// A pending cleanup marker stays durable until the cleanup worker resolves it.
+	// Send admission narrows terminal cleanup to the same profile.
 	return fmt.Sprintf("(%stimeout_cleanup_at IS NOT NULL OR (%ssend_phase='cleanup_processing' AND %sstatus NOT IN ('sent','failed','superseded')))", p, p, p)
 }
 
@@ -93,11 +93,11 @@ func telegramChannelJobPendingCleanup(job telegramJobRecord) bool {
 }
 
 func telegramChannelJobOwnsOrder(job telegramJobRecord) bool {
-	if telegramChannelJobPendingCleanup(job) {
-		return true
-	}
 	if isTelegramChannelJobTerminal(job) {
 		return false
+	}
+	if telegramChannelJobPendingCleanup(job) {
+		return true
 	}
 	switch job.Status {
 	case telegramJobStatusSending, telegramJobStatusConfirming, "confirming", "reconciling":
@@ -122,7 +122,8 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 	scope, args := telegramChannelOrderScopeSQL("j", job)
 	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
 		Where("j.id <> ?", job.Id).Where(scope, args...).
-		Where(telegramChannelStartedJobSQL("j"))
+		Where(telegramChannelStartedJobSQL("j")).
+		Where("(j.status NOT IN ('sent','failed','superseded') OR (j.profile_id > 0 AND j.profile_id = ?))", job.ProfileId)
 	if telegramChannelJobOwnsOrder(job) {
 		model = model.Where("("+telegramChannelPendingCleanupSQL("j")+" OR j.id < ?)", job.Id)
 	}
@@ -131,6 +132,9 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 		return false, err
 	}
 	if !row.IsEmpty() {
+		if predecessor, ok := ctx.Value(telegramPredecessorKey{}).(*int64); ok {
+			*predecessor = row["id"].Int64()
+		}
 		g.Log().Warning(ctx, "频道保留已开始资料的发送顺序", g.Map{
 			"event": "channel_queue_order_blocked", "jobId": job.Id, "channelId": job.ChannelId,
 			"targetChatId": job.TargetChatId, "blockingJobId": row["id"].Int64(),

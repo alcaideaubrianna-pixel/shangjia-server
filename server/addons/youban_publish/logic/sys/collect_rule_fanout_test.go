@@ -114,3 +114,36 @@ func TestCollectRuleFanoutCancellationDoesNotPretendSuccess(t *testing.T) {
 		t.Fatalf("canceled event was acknowledged: %+v", got)
 	}
 }
+
+func TestCollectRuleFanoutTerminalMediaValidation(t *testing.T) {
+	validation := gerror.Wrap(errProfileMediaValidation, "展示媒体实际1个")
+	transient := errors.New("database timeout")
+	for _, tc := range []struct {
+		name string
+		errs []error
+		want bool
+	}{
+		{"validation_and_success", []error{validation, nil}, true},
+		{"validation_and_wait", []error{validation, newCollectProcessRetryError(time.Second, "waiting")}, false},
+		{"validation_and_database", []error{validation, transient}, false},
+		{"joined_database_not_hidden", []error{errors.Join(validation, transient)}, false},
+		{"all_validation", []error{validation, gerror.Wrap(validation, "second rule")}, true},
+		{"success", []error{nil}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := make([]gdb.Record, len(tc.errs))
+			for i := range rules {
+				rules[i] = gdb.Record{"id": g.NewVar(i + 1)}
+			}
+			calls := 0
+			result := executeCollectRuleBranches(context.Background(), rules, func(_ context.Context, rule gdb.Record) (bool, string, error) {
+				calls++
+				err := tc.errs[rule["id"].Int()-1]
+				return err == nil, "", err
+			})
+			if calls != len(rules) || result.terminalProcessingFailure() != tc.want {
+				t.Fatalf("calls=%d result=%+v wantTerminal=%t", calls, result, tc.want)
+			}
+		})
+	}
+}

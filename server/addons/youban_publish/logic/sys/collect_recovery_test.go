@@ -76,3 +76,33 @@ func TestCollectMediaRecoveryFollowsItemTimeout(t *testing.T) {
 		t.Fatalf("media recovery is too slow: %s", collectMediaRecoverAfter)
 	}
 }
+
+func TestCollectMediaValidationStopsPollingUntilReplay(t *testing.T) {
+	event := gdb.Record{"status": gvar.New("failed"), "error_message": gvar.New("采集规则338分发失败: 展示媒体实际1个: 资料媒体校验不合格")}
+	if shouldRecoverCollectEvent(event) || !collectProcessEventFinished(event) || !collectEventTerminalProcessingFailure(event) {
+		t.Fatal("validation failure must remain terminal for automatic recovery")
+	}
+	fields := collectReplayUpdateFields(event, &CollectMessage{}, gtime.Now())
+	if fields["status"] == "failed" || fields["processed_at"] != nil || fields["error_message"] != "" {
+		t.Fatalf("media replay must reopen failed event: %+v", fields)
+	}
+	event["status"] = gvar.New(fields["status"])
+	event["error_message"] = gvar.New(fields["error_message"])
+	if collectEventTerminalProcessingFailure(event) || collectProcessEventFinished(event) {
+		t.Fatal("updated material must be processable")
+	}
+}
+
+func TestCollectTerminalInputFailureRecovery(t *testing.T) {
+	for _, message := range []string{"采集规则1分发失败: 采集资料标题为空", "采集规则1分发失败: pq: value too long for type character varying(255)"} {
+		row := gdb.Record{"status": gvar.New("failed"), "error_message": gvar.New(message)}
+		if shouldRecoverCollectEvent(row) || !collectProcessEventFinished(row) || !collectEventTerminalProcessingFailure(row) {
+			t.Fatalf("persisted terminal input error reopened: %s", message)
+		}
+		row["status"] = gvar.New("pending")
+		row["error_message"] = gvar.New("")
+		if !shouldRecoverCollectEvent(row) || collectProcessEventFinished(row) || collectEventTerminalProcessingFailure(row) {
+			t.Fatal("explicitly reopened event must resume")
+		}
+	}
+}

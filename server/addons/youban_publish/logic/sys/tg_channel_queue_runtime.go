@@ -14,6 +14,12 @@ import (
 	publishconsts "hotgo/addons/youban_publish/consts"
 )
 
+var (
+	channelQueueSlots, _     = publishObserveMeter.Int64Gauge("xiaohuiji.publish.channel_worker.slots_in_use")
+	channelQueueSlotLimit, _ = publishObserveMeter.Int64Gauge("xiaohuiji.publish.channel_worker.slot_limit")
+	channelQueueSlotFull, _  = publishObserveMeter.Int64Counter("xiaohuiji.publish.channel_worker.slot_full")
+)
+
 // telegramChannelQueueDispatcher bounds local work across polling passes.
 // The existing distributed channel lease still guards cross-process sends.
 type telegramChannelQueueDispatcher struct {
@@ -22,11 +28,19 @@ type telegramChannelQueueDispatcher struct {
 	running map[int64]struct{}
 	wg      sync.WaitGroup
 	next    int
+
+	// Updated only by the scheduling loop.
+	slotWindowStartedAt time.Time
+	slotWindowPeak      int
+	slotWindowFull      int64
+	slotWindowSamples   int
+	slotWindowSum       int
 }
 
 // dispatch resumes after the last admitted channel so a fixed active list is fair.
 // Only the scheduling loop calls dispatch; submit protects in-flight state.
 func (d *telegramChannelQueueDispatcher) dispatch(ctx context.Context, channels []int64, process func(int64)) {
+	defer d.observeSlots(ctx, len(channels))
 	if len(channels) == 0 {
 		d.next = 0
 		return
@@ -38,6 +52,41 @@ func (d *telegramChannelQueueDispatcher) dispatch(ctx context.Context, channels 
 			d.next = (index + 1) % len(channels)
 		}
 	}
+}
+
+func (d *telegramChannelQueueDispatcher) observeSlots(ctx context.Context, activeChannels int) {
+	used, limit := len(d.sem), cap(d.sem)
+	channelQueueSlots.Record(ctx, int64(used))
+	channelQueueSlotLimit.Record(ctx, int64(limit))
+	d.slotWindowPeak = max(d.slotWindowPeak, used)
+	d.slotWindowSamples++
+	d.slotWindowSum += used
+	now := time.Now()
+	if d.slotWindowStartedAt.IsZero() {
+		d.slotWindowStartedAt = now
+		return
+	}
+	window := now.Sub(d.slotWindowStartedAt)
+	if window < 30*time.Second {
+		return
+	}
+	g.Log().Info(ctx, "频道推送并发配额", g.Map{
+		"event":                   "channel_worker_capacity",
+		"windowSeconds":           int64(window / time.Second),
+		"activeChannels":          activeChannels,
+		"slotsInUse":              used,
+		"slotLimit":               limit,
+		"slotUsagePct":            float64(used) * 100 / float64(limit),
+		"peakSlotsInUse":          d.slotWindowPeak,
+		"avgSlotUsagePct":         float64(d.slotWindowSum) * 100 / (float64(d.slotWindowSamples) * float64(limit)),
+		"peakSlotUsagePct":        float64(d.slotWindowPeak) * 100 / float64(limit),
+		"dispatchSkippedSlotFull": d.slotWindowFull,
+	})
+	d.slotWindowStartedAt = now
+	d.slotWindowPeak = used
+	d.slotWindowFull = 0
+	d.slotWindowSamples = 0
+	d.slotWindowSum = 0
 }
 
 // runTelegramChannelQueueSchedule owns all submissions and waits only at shutdown.
@@ -97,8 +146,12 @@ func (d *telegramChannelQueueDispatcher) submit(ctx context.Context, channelID i
 	}
 	select {
 	case d.sem <- struct{}{}:
+		d.slotWindowPeak = max(d.slotWindowPeak, len(d.sem))
 	default:
+		d.slotWindowPeak = cap(d.sem)
+		d.slotWindowFull++
 		d.mu.Unlock()
+		channelQueueSlotFull.Add(ctx, 1)
 		return false
 	}
 	d.running[channelID] = struct{}{}

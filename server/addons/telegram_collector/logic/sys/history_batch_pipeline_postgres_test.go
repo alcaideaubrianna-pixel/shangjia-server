@@ -14,6 +14,7 @@ import (
 	"hotgo/addons/telegram_collector/internal/model/entity"
 	"hotgo/addons/telegram_collector/model/input/sysin"
 	"hotgo/internal/library/microbatch"
+	"hotgo/utility/sourcequeue"
 )
 
 func TestHistoryBatchPipelineLocalPostgres(t *testing.T) {
@@ -94,6 +95,22 @@ func TestHistoryBatchPipelineLocalPostgres(t *testing.T) {
 		t.Logf("20 events: selected persistence SQL statements=%d; previous per-event path=100", sqlCalls.Load())
 		if sqlCalls.Load() >= 20 {
 			t.Fatalf("coalescing did not reduce round trips: %d", sqlCalls.Load())
+		}
+		if _, err := g.DB().Exec(ctx, `UPDATE hg_tg_collector_event SET status='processing',lease_owner='live',attempt_count=2 WHERE id IN (1,2)`); err != nil {
+			return err
+		}
+		liveCtx := withCollectorSourceLane(ctx, sourcequeue.Realtime)
+		if !realtimeEventReadyBatchEnabled(liveCtx) {
+			t.Fatal("realtime completion writer is disabled")
+		}
+		if err := s.completeCollectorEvent(liveCtx, &entity.TgCollectorEvent{Id: 1, TenantId: 78, LeaseOwner: "live", AttemptCount: 2}); err != nil {
+			t.Fatalf("realtime completion: %v", err)
+		}
+		if err := s.completeCollectorEvent(liveCtx, &entity.TgCollectorEvent{Id: 2, TenantId: 78, LeaseOwner: "live", AttemptCount: 1}); err == nil {
+			t.Fatal("stale attempt confirmed through realtime completion")
+		}
+		if s.realtimeEventBatch == nil || s.realtimeEventBatch == s.historyEventBatch {
+			t.Fatal("realtime completion must use an independent writer")
 		}
 		for _, ddl := range []string{`DROP TABLE hg_tg_collector_delivery`, `DROP TABLE hg_tg_collector_event`} {
 			if _, err := g.DB().Exec(ctx, ddl); err != nil {

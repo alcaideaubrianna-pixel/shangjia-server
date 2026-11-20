@@ -416,6 +416,9 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		g.Log().Warningf(ctx, "采集事件不存在，跳过处理 eventId:%d tenantId:%d accountId:%d", eventId, tenantId, accountId)
 		return gerror.New("采集事件不存在")
 	}
+	if cooldownErr := collectEventConfigurationCooldown(ctx, event); cooldownErr != nil {
+		return cooldownErr
+	}
 	ctx = collectBusinessEventContext(ctx, event, nil, 0)
 	// Old persisted events and recovery tasks bypass the delivery ingress.
 	// Check the actual Telegram chat before any media, profile or dispatch work.
@@ -800,18 +803,52 @@ func (s *sSysPublish) processCollectEvent(ctx context.Context, eventId int64, te
 		}
 	}
 	if fanout.Err != nil {
-		// A failed branch must not finish the whole event or cancel its media.
-		// Completed branches retain their dispatch/operation identity on retry.
+		// Persist terminal input/validation failures before acknowledging the wakeup.
+		// Mixed transient failures keep the event retryable; successful siblings
+		// retain their existing dispatch/operation identities in either case.
+		terminalFailure := fanout.terminalProcessingFailure()
+		status := sysin.CollectEventStatusMediaReady
+		var processedAt *gtime.Time
+		if terminalFailure {
+			status = sysin.CollectEventStatusFailed
+			processedAt = gtime.Now()
+		}
 		cols := pdao.YoubanPublishCollectEvent.Columns()
 		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		_, saveErr := pdao.YoubanPublishCollectEvent.Ctx(saveCtx).WherePri(eventId).
-			Where(cols.TenantId, tenantId).Where(cols.SourceId, event["source_id"].Int64()).
-			Data(g.Map{cols.Status: sysin.CollectEventStatusMediaReady, cols.ProcessedAt: nil,
-				cols.ErrorMessage: fanout.Err.Error()}).Update()
+		failureModel := pdao.YoubanPublishCollectEvent.Ctx(saveCtx).WherePri(eventId).
+			Where(cols.TenantId, tenantId).Where(cols.SourceId, event["source_id"].Int64())
+		if terminalFailure {
+			// An arriving album item/replay may already have reopened this row.
+			// Never close that newer material using the previous attempt's error.
+			failureModel = failureModel.WhereIn(cols.Status, []string{sysin.CollectEventStatusMediaReady, sysin.CollectEventStatusFailed}).
+				Where(cols.MediaCount, event[cols.MediaCount].Int()).
+				Where("COALESCE("+cols.TextHash+", '')=?", event[cols.TextHash].String())
+		}
+		saved, saveErr := failureModel.Data(g.Map{cols.Status: status, cols.ProcessedAt: processedAt,
+			cols.ErrorMessage: fanout.Err.Error()}).Update()
 		cancel()
 		if saveErr != nil {
 			err = gerror.Wrap(saveErr, "保存采集规则未完成状态失败")
 			return err
+		}
+		if terminalFailure {
+			affected, affectedErr := saved.RowsAffected()
+			if affectedErr != nil {
+				return gerror.Wrap(affectedErr, "确认采集校验失败状态保存结果失败")
+			}
+			if affected == 0 {
+				return newCollectProcessRetryError(time.Second, "采集资料已更新，重新校验最新媒体")
+			}
+			event[cols.Status] = g.NewVar(status)
+			event[cols.ProcessedAt] = g.NewVar(processedAt)
+			event[cols.ErrorMessage] = g.NewVar(fanout.Err.Error())
+			s.syncCollectSourceStatsForEvent(ctx, eventId)
+			return nil
+		}
+		if delay := fanout.configurationCooldownDelay(); delay > 0 {
+			if cooldownErr := saveCollectEventConfigurationCooldown(ctx, event, fanout.Err.Error(), delay); cooldownErr != nil {
+				return cooldownErr
+			}
 		}
 		err = fanout.Err
 		return err

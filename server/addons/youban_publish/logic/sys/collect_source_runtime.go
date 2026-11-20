@@ -260,6 +260,9 @@ func executeCollectSourceRuntimeClaimWithHandler(ctx context.Context, queue coll
 }
 
 func collectSourceRuntimeRetry(err error) (time.Duration, string) {
+	if collectConfigurationFailure(err) {
+		return collectConfigurationRetryDelay, "configuration_unavailable"
+	}
 	if err == nil {
 		return 0, "none"
 	}

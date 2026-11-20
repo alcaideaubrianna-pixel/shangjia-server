@@ -215,6 +215,12 @@ func looksLikeProfileSearchIdentifier(text string) bool {
 }
 
 func (s *sSysBot) profileMenuMarkup(ctx context.Context) *models.InlineKeyboardMarkup {
+	if collectorInteractionFromContext(ctx) != nil {
+		return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "搜索笔记", CallbackData: "pf:search"}},
+			{{Text: "编辑笔记", CallbackData: "pf:askedit"}, {Text: "新建笔记", CallbackData: "pf:create"}},
+		}}
+	}
 	rows := [][]models.InlineKeyboardButton{
 		{{Text: "笔记列表", CallbackData: "pf:list:1"}, {Text: "新建笔记", CallbackData: "pf:create"}},
 		{{Text: "搜索笔记", CallbackData: "pf:search"}, {Text: "发送笔记", CallbackData: "pf:asksend"}},
@@ -228,7 +234,7 @@ func (s *sSysBot) profileMenuMarkup(ctx context.Context) *models.InlineKeyboardM
 }
 
 func (s *sSysBot) showProfileMenu(ctx context.Context, botId int64, msg *models.Message) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -237,7 +243,7 @@ func (s *sSysBot) showProfileMenu(ctx context.Context, botId int64, msg *models.
 }
 
 func (s *sSysBot) showProfileMenuToChat(ctx context.Context, botId int64, chatId string, text string) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -342,8 +348,14 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	if query == nil || (!strings.HasPrefix(query.Data, "pf:") && !strings.HasPrefix(query.Data, "ch:") && !strings.HasPrefix(query.Data, "cm:")) {
 		return false, nil
 	}
+	if botId < 0 {
+		state := collectorInteractionFromContext(ctx)
+		if state == nil || state.botID != botId || state.userID != query.From.ID || collectorCallbackAction(query.Data) == "" {
+			return true, nil
+		}
+	}
 	ctx = context.WithValue(ctx, telegramUserIdCtxKey{}, fmt.Sprintf("%d", query.From.ID))
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return true, err
 	}
@@ -364,7 +376,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, nil
 	}
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)
-	account, accErr := s.boundProfileAccountByUser(ctx, query.From.ID)
+	account, accErr := s.profileAccountForInteraction(ctx, query.From.ID)
 	if accErr != nil {
 		return true, s.replyBotError(ctx, botId, chatId, "资料管理账号绑定", accErr)
 	}
@@ -388,7 +400,7 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 	// Status callbacks send their own immediate result after the fresh state
 	// check. Answering them here first would make Telegram ignore the useful
 	// status-specific callback toast.
-	if action != "up" && action != "down" {
+	if query.ID != "" && action != "up" && action != "down" && action != "publishup" {
 		_, _ = bot.AnswerCallbackQuery(callCtx, &tgbot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 	}
 	if strings.HasPrefix(query.Data, "ch:") {
@@ -435,6 +447,9 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.cancelProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
 	case "createback":
 		session := s.activeProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
+		if botId < 0 && (session == nil || session.TenantId != account.TenantId || session.AccountId != account.AccountId) {
+			return true, s.sendMessageOnly(ctx, botId, chatId, "当前会话已失效，请重新操作。")
+		}
 		if session == nil || (session.Scene != "create" && session.Scene != "batch_create" && session.Scene != "replace") {
 			return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 		}
@@ -452,10 +467,21 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 		return true, s.sendProfileCreateStepPrompt(ctx, botId, chatId, "waiting_display")
 	case "createskip":
 		session := s.activeProfileSessionByIds(ctx, botId, fmt.Sprintf("%d", query.From.ID), chatId)
+		if botId < 0 && (session == nil || session.TenantId != account.TenantId || session.AccountId != account.AccountId) {
+			return true, s.sendMessageOnly(ctx, botId, chatId, "当前会话已失效，请重新操作。")
+		}
 		if session == nil || (session.Scene != "create" && session.Scene != "batch_create" && session.Scene != "replace") || session.Step != "waiting_verify" {
 			return true, s.replyBotError(ctx, botId, chatId, "资料管理", gerror.New("当前没有可跳过的验证资料步骤"))
 		}
 		return true, s.consumeProfileCreatePart(ctx, botId, chatId, account, session, "跳过", nil)
+	case "publishup":
+		if botId >= 0 {
+			return true, nil
+		}
+		if state := collectorInteractionFromContext(ctx); state != nil && state.bot != nil && state.bot.RequirePublishReview {
+			return true, s.submitCollectorProfileReview(ctx, state, chatId, query, no)
+		}
+		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, "up", no, 1)
 	case "up":
 		return true, s.changeProfilesStatusByCallback(ctx, botId, chatId, account, query, action, no, 1)
 	case "down":
@@ -544,11 +570,11 @@ func (s *sSysBot) handleProfileCallback(ctx context.Context, botId int64, query 
 }
 
 func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId, profileNo string) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
-	account, err := s.boundProfileAccountByUser(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx)))
+	account, err := s.profileAccountForInteraction(ctx, parseTelegramUserId(telegramUserIdFromCtx(ctx)))
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
@@ -556,7 +582,7 @@ func (s *sSysBot) confirmProfileDelete(ctx context.Context, botId int64, chatId,
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
-	if profileCardPurpose(account, note, "delete") == "readonly" {
+	if profileCardPurpose(account, note, "delete") == "readonly" || (botId < 0 && note.AccountId != account.AccountId) {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
 	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId,
@@ -573,7 +599,7 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", err)
 	}
-	if profileCardPurpose(account, note, "delete") == "readonly" {
+	if profileCardPurpose(account, note, "delete") == "readonly" || (botId < 0 && note.AccountId != account.AccountId) {
 		return s.replyBotError(ctx, botId, chatId, "资料删除", gerror.New("当前资料只读，无权删除"))
 	}
 	claimed, err := reserveBotProfileMutation(ctx, account, note.Id, "delete")
@@ -592,13 +618,16 @@ func (s *sSysBot) deleteProfileByCallback(ctx context.Context, botId int64, chat
 	accountCopy := *account
 	go func() {
 		workCtx := context.Background()
-		err := publishService.SysPublish().BotProfileDeleteWithNotice(workCtx, &publishsysin.BotProfileDeleteInp{
-			ProfileDeleteInp: publishsysin.ProfileDeleteInp{Ids: []int64{profileId}},
-			TenantId:         accountCopy.TenantId,
-			AccountId:        accountCopy.AccountId,
-			NotifyBotId:      botId,
-			NotifyChatId:     chatId,
-		})
+		input := publishsysin.ProfileDeleteInp{Ids: []int64{profileId}}
+		var err error
+		if botId < 0 {
+			err = publishService.SysPublish().BotProfileDelete(workCtx, accountCopy.TenantId, accountCopy.AccountId, &input)
+		} else {
+			err = publishService.SysPublish().BotProfileDeleteWithNotice(workCtx, &publishsysin.BotProfileDeleteInp{
+				ProfileDeleteInp: input, TenantId: accountCopy.TenantId, AccountId: accountCopy.AccountId,
+				NotifyBotId: botId, NotifyChatId: chatId,
+			})
+		}
 		if err != nil {
 			_ = releaseBotProfileMutation(workCtx, &accountCopy, profileId, "delete")
 			_ = s.sendMessageOnly(workCtx, botId, chatId, fmt.Sprintf("资料编号：%s 下架删除失败：%s", html.EscapeString(no), html.EscapeString(err.Error())))
@@ -743,7 +772,7 @@ func (s *sSysBot) handleProfileInlineQuery(ctx context.Context, botId int64, que
 		if err != nil {
 			return err
 		}
-		row, err := s.botById(ctx, botId)
+		row, err := s.profileBotById(ctx, botId)
 		if err != nil {
 			return err
 		}
@@ -882,7 +911,7 @@ func (s *sSysBot) handleTemplateInlineQuery(ctx context.Context, botId int64, qu
 		}
 	}
 	botLookupStartedAt := time.Now()
-	botRow, err := s.botById(ctx, botId)
+	botRow, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		g.Log().Errorf(ctx, "Inline阶段失败 stage:bot_lookup botId:%d queryId:%s duration:%s err:%+v", botId, query.ID, time.Since(botLookupStartedAt), err)
 		return err
@@ -1067,7 +1096,17 @@ func (s *sSysBot) boundProfileAccount(ctx context.Context, msg *models.Message) 
 	if msg == nil || msg.From == nil {
 		return nil, gerror.New("无法识别Telegram用户")
 	}
-	return s.boundProfileAccountByUser(ctx, msg.From.ID)
+	return s.profileAccountForInteraction(ctx, msg.From.ID)
+}
+
+func (s *sSysBot) profileAccountForInteraction(ctx context.Context, telegramUserId int64) (*botProfileAccount, error) {
+	if state := collectorInteractionFromContext(ctx); state != nil {
+		if state.userID != telegramUserId || state.account == nil {
+			return nil, gerror.New("请先绑定当前租户的上架账户")
+		}
+		return state.account, nil
+	}
+	return s.boundProfileAccountByUser(ctx, telegramUserId)
 }
 
 func (s *sSysBot) boundProfileAccountByUser(ctx context.Context, telegramUserId int64) (*botProfileAccount, error) {
@@ -1128,7 +1167,7 @@ func (s *sSysBot) showProfileList(ctx context.Context, botId int64, chatId strin
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "笔记列表", err)
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -1203,6 +1242,10 @@ func (s *sSysBot) changeProfilesStatusByCallback(ctx context.Context, botId int6
 		s.auditProfileCallback(ctx, query, account, action, no, viewErr)
 		s.answerProfileCallback(ctx, botId, query, viewErr.Error())
 		return s.replyBotError(ctx, botId, chatId, "资料管理", viewErr)
+	}
+	if botId < 0 && current != nil && current.AccountId != account.AccountId {
+		s.answerProfileCallback(ctx, botId, query, "只能操作自己的资料")
+		return nil
 	}
 	if writeErr := ensureBotProfileWritable(account, current); writeErr != nil {
 		s.auditProfileCallback(ctx, query, account, action, no, writeErr)
@@ -1343,7 +1386,7 @@ func (s *sSysBot) answerProfileCallback(ctx context.Context, botId int64, query 
 	if query == nil || strings.TrimSpace(text) == "" {
 		return
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return
 	}
@@ -1414,7 +1457,7 @@ func (s *sSysBot) searchProfilesAndReply(ctx context.Context, botId int64, chatI
 
 func (s *sSysBot) consumeProfileSearchImageMessage(ctx context.Context, botId int64, msg *models.Message, account *botProfileAccount, session *profileSessionRow) error {
 	chatId := fmt.Sprintf("%d", msg.Chat.ID)
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -1512,7 +1555,7 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	if note == nil {
 		return nil
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -1529,6 +1572,21 @@ func (s *sSysBot) sendProfileCard(ctx context.Context, botId int64, chatId strin
 	// by the explicit preview/send flow, avoiding duplicate and noisy replies.
 	text := profileCardText(header, "")
 	markup := profileCardMarkupForNote(note, purpose)
+	if botId < 0 {
+		state := collectorInteractionFromContext(ctx)
+		if purpose == "view" && state != nil && state.account != nil &&
+			note.AccountId == state.account.AccountId && note.TenantId == state.account.TenantId {
+			markup = collectorOwnedNoteMarkup(note, state.bot != nil && state.bot.RequirePublishReview)
+		} else {
+			if purpose == "view" || purpose == "readonly" {
+				markup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+					{{Text: "预览", CallbackData: profileCallbackDataForNote("preview", note)}},
+					{{Text: "返回列表", CallbackData: "pf:list:1"}},
+				}}
+			}
+			markup = collectorNoteMarkup(markup)
+		}
+	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
 }
@@ -1562,6 +1620,9 @@ func profileCardDisplayStatus(note *publishsysin.NoteModel) string {
 	// The persisted online/offline state is authoritative. A previous
 	// publish task can remain "published" after a successful offline
 	// transition, and must not make an offline card look online.
+	if note.Status == publishsysin.ProfileStatusReviewPending {
+		return "审核中"
+	}
 	if note.Status != 1 {
 		if profileTaskInProgress(note) {
 			return "下架中"
@@ -1615,7 +1676,7 @@ func (s *sSysBot) sendProfileContent(ctx context.Context, botId int64, chatId st
 	if note == nil {
 		return nil
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -2207,7 +2268,10 @@ func profileCardMarkupForNote(note *publishsysin.NoteModel, purpose string) *mod
 		profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 		statusAction := "pf:up:"
 		statusLabel := "上架"
-		if profileTaskInProgress(note) {
+		if note.Status == publishsysin.ProfileStatusReviewPending {
+			statusAction = "pf:view:"
+			statusLabel = "审核中"
+		} else if profileTaskInProgress(note) {
 			statusAction = "pf:view:"
 			statusLabel = "处理中"
 			if note.Status == 1 {
@@ -2328,7 +2392,7 @@ func profileSessionTimeoutText() string {
 }
 
 func (s *sSysBot) sendProfileCreateStepPrompt(ctx context.Context, botId int64, chatId string, step string) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -2353,11 +2417,14 @@ func profileMessageMediaSizeError(msg *models.Message) error {
 }
 
 func (s *sSysBot) sendMessageOnly(ctx context.Context, botId int64, chatId string, text string) error {
+	if botId < 0 {
+		return s.sendCollectorReply(ctx, botId, chatId, text)
+	}
 	return s.reply(ctx, botId, chatId, text)
 }
 
 func (s *sSysBot) sendPlainMessageOnly(ctx context.Context, botId int64, chatId string, text string) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -2451,7 +2518,7 @@ func profileSessionDuration(scene string) time.Duration {
 }
 
 func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, chatId string, scene string, profileId int64, profileNo string, text string) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -2492,7 +2559,11 @@ func (s *sSysBot) sendProfileSessionPrompt(ctx context.Context, botId int64, cha
 		cancelData = fmt.Sprintf("cm:channelsuffixcancel:%d:%s", session.Id, payload.ConfirmationToken)
 	}
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "取消当前操作", CallbackData: cancelData}})
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, &models.InlineKeyboardMarkup{InlineKeyboard: buttons})
+	markup := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+	if botId < 0 {
+		markup = collectorNoteMarkup(markup)
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
 }
 
@@ -2775,7 +2846,7 @@ func (s *sSysBot) consumeProfileSessionMessage(ctx context.Context, botId int64,
 		}
 		g.Log().Infof(ctx, "Bot资料收尾阶段完成 trace:%s stage:reserve_media_group elapsed_ms:%d", trace, time.Since(stageStartedAt).Milliseconds())
 		stageStartedAt = time.Now()
-		row, err := s.botById(ctx, botId)
+		row, err := s.profileBotById(ctx, botId)
 		if err != nil {
 			g.Log().Warningf(ctx, "Bot资料收尾阶段失败 trace:%s stage:load_bot_for_media elapsed_ms:%d err:%s", trace, time.Since(stageStartedAt).Milliseconds(), sensitive.Diagnostic(err.Error()))
 			return err
@@ -2882,7 +2953,7 @@ func (s *sSysBot) consumeProfileSessionMessageLocked(ctx context.Context, botId 
 	if err := profileMessageMediaSizeError(msg); err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -3317,6 +3388,23 @@ func (s *sSysBot) sendProfileCreateSuccess(ctx context.Context, botId int64, cha
 		}
 		text += fmt.Sprintf("\n\n如需继续新增，请发送【下一份展示资料】。连续 %s 无操作，将自动结束新增；也可发送 /cancel 立即结束。", profileSessionTimeoutText())
 	}
+	if botId < 0 {
+		markup = collectorNoteMarkup(markup)
+		bot, err := collectorBotByID(ctx, -botId)
+		if err != nil {
+			return err
+		}
+		if profileNo != "" && (isBatch || bot.RequirePublishReview) {
+			label := "上架"
+			if bot.RequirePublishReview {
+				label = "提交审核"
+				text = strings.Replace(text, "，确认无误后可直接上架", "，确认无误后可提交审核", 1)
+			}
+			markup.InlineKeyboard = append([][]models.InlineKeyboardButton{{{Text: label, CallbackData: "pf:publishup:" + profileNo}}}, markup.InlineKeyboard...)
+		} else {
+			text = strings.Replace(text, "，确认无误后可直接上架", "", 1)
+		}
+	}
 	return s.sendProfileSaveNotice(ctx, botId, chatId, text, markup)
 }
 
@@ -3348,7 +3436,7 @@ func formatProfileMediaSummary(media []*publishsysin.MessageTemplateMediaInp) st
 
 // Save notifications respect the caller's deadline and never query profile views.
 func (s *sSysBot) sendProfileSaveNotice(ctx context.Context, botId int64, chatId, text string, markup *models.InlineKeyboardMarkup) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -3843,7 +3931,7 @@ func (s *sSysBot) finishProfileMediaGroup(botId int64, groupId string, account *
 			g.Log().Errorf(context.Background(), "Bot资料媒体组收尾超时 trace:%s groupId:%s timeout:%s", trace, groupId, profileProcessingTimeout)
 			_ = s.sendMessageOnly(context.Background(), botId, pending.ChatId, fmt.Sprintf("资料处理超时，请重新发送。\n处理编号：%s", trace))
 		}
-		_ = s.reply(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(botErrorMessage(consumeErr)))
+		_ = s.sendMessageOnly(ctx, botId, pending.ChatId, "资料媒体组解析失败："+html.EscapeString(botErrorMessage(consumeErr)))
 		return
 	}
 	g.Log().Infof(ctx, "Bot资料媒体组消费完成 trace:%s groupId:%s step:%s elapsed_ms:%d", trace, groupId, current.Step, time.Since(startedAt).Milliseconds())
@@ -3873,7 +3961,7 @@ func tryProfileMediaFinalizeLock(sessionId int64, groupId string) (*hglock.Lock,
 }
 
 func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context, botId int64, chatId string, groupId string) ([]*publishsysin.MessageTemplateMediaInp, string, error) {
-	if botId <= 0 || strings.TrimSpace(chatId) == "" || strings.TrimSpace(groupId) == "" {
+	if botId == 0 || strings.TrimSpace(chatId) == "" || strings.TrimSpace(groupId) == "" {
 		return nil, "", nil
 	}
 	var rows []struct {
@@ -3889,7 +3977,7 @@ func (s *sSysBot) rebuildProfileMediaGroupFromStoredMessages(ctx context.Context
 	if len(rows) == 0 {
 		return nil, "", nil
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return nil, "", err
 	}
@@ -4117,7 +4205,7 @@ func (s *sSysBot) replyInlineShareButton(ctx context.Context, botId int64, chatI
 	}
 	query := token
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: "选择聊天内联分享", SwitchInlineQuery: &query}, {Text: "当前聊天分享", SwitchInlineQueryCurrentChat: &query}}}}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4178,7 +4266,7 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 	if profileCardPurpose(account, note, "edit") == "readonly" {
 		return s.sendProfileCard(ctx, botId, chatId, note, "readonly")
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4189,6 +4277,9 @@ func (s *sSysBot) showProfileEditMenu(ctx context.Context, botId int64, chatId s
 		{{Text: "上架频道编辑", CallbackData: "pf:channels:" + note.ProfileNo}},
 		{{Text: "返回", CallbackData: "pf:backview:" + note.ProfileNo}},
 	}}
+	if botId < 0 {
+		markup = collectorNoteMarkup(markup)
+	}
 	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
 }
@@ -4234,7 +4325,7 @@ func (s *sSysBot) showProfileChannelEditMenuMessage(ctx context.Context, botId i
 	}
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "确认选择", CallbackData: "pf:chconfirm:" + strings.ToUpper(no)}})
 	buttons = append(buttons, []models.InlineKeyboardButton{{Text: "返回", CallbackData: "pf:editback:" + strings.ToUpper(no)}})
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4339,13 +4430,17 @@ func (s *sSysBot) sendProfileEditSuccess(ctx context.Context, botId int64, chatI
 	if note == nil || strings.TrimSpace(note.ProfileNo) == "" {
 		return s.sendMessageOnly(ctx, botId, chatId, title+"。")
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
 	profileNo := strings.ToUpper(strings.TrimSpace(note.ProfileNo))
 	text := fmt.Sprintf("<b>%s</b>\n\n编号：<code>%s</code>\n标题：<code>%s</code>", html.EscapeString(title), html.EscapeString(profileNo), html.EscapeString(note.Title))
-	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, profileEditSuccessMarkupForNote(note))
+	markup := profileEditSuccessMarkupForNote(note)
+	if botId < 0 {
+		markup = collectorNoteMarkup(markup)
+	}
+	_, err = s.sendMessageWithMarkup(ctx, row.BotToken, chatId, text, "HTML", false, markup)
 	return err
 }
 
@@ -4481,7 +4576,7 @@ func (s *sSysBot) showChannelList(ctx context.Context, botId int64, chatId strin
 	if err != nil {
 		return s.replyBotError(ctx, botId, chatId, "资料管理", err)
 	}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4551,7 +4646,7 @@ func (s *sSysBot) showChannelDetail(ctx context.Context, botId int64, chatId str
 		{{Text: "取消当前频道全部未完成队列", CallbackData: fmt.Sprintf("ch:clear:%d", ch.Id)}},
 		{{Text: "返回频道列表", CallbackData: "ch:list"}, {Text: "返回资料管理", CallbackData: "ch:backprofile"}},
 	}}
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4607,7 +4702,7 @@ func (s *sSysBot) toggleChannelCycle(ctx context.Context, botId int64, chatId st
 }
 
 func (s *sSysBot) sendChannelResult(ctx context.Context, botId int64, chatId string, text string, channelId int64) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}
@@ -4621,7 +4716,7 @@ func (s *sSysBot) sendChannelResult(ctx context.Context, botId int64, chatId str
 }
 
 func (s *sSysBot) confirmChannelClearQueue(ctx context.Context, botId int64, chatId string, channelId int64, all bool) error {
-	row, err := s.botById(ctx, botId)
+	row, err := s.profileBotById(ctx, botId)
 	if err != nil {
 		return err
 	}

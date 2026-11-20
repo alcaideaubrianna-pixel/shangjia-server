@@ -28,14 +28,23 @@ import (
 
 var errDeliveryInvalidEvent = errors.New("采集交付原始事件不可用")
 
+type deliveryNotDueError struct {
+	at time.Time
+}
+
+func (e *deliveryNotDueError) Error() string { return "采集交付尚未到重试时间" }
+
 const deliveryTaskType = "telegram_collector:delivery"
 
 const (
-	deliveryLeaseDuration     = 3 * time.Minute
-	deliveryRecoveryInterval  = 30 * time.Second
-	deliveryRecoveryStaleTime = 15 * time.Second
-	deliveryTaskUniqueTTL     = 5 * time.Minute
-	deliveryMaxAttempts       = 5
+	deliveryLeaseDuration             = 3 * time.Minute
+	deliveryRecoveryInterval          = 30 * time.Second
+	deliveryLeaseRecoveryInterval     = 5 * time.Second
+	deliveryLeaseRecoveryScopeLimit   = 8
+	deliveryLeaseRecoveryScopeTimeout = 400 * time.Millisecond
+	deliveryRecoveryStaleTime         = 15 * time.Second
+	deliveryTaskUniqueTTL             = 5 * time.Minute
+	deliveryMaxAttempts               = 5
 )
 
 func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
@@ -66,11 +75,13 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 		}
 	}
 	s.startDeliverySourcePools(runtimeCtx, q, collectorDeliveryConcurrency(runtimeCtx), historyWorkers)
-	s.runtimeWG.Add(1)
+	s.runtimeWG.Add(2)
 	go func() { defer s.runtimeWG.Done(); s.runDeliveryRecovery(runtimeCtx) }()
+	go func() { defer s.runtimeWG.Done(); s.runDeliveryLeaseRecovery(runtimeCtx) }()
 	g.Log().Info(runtimeCtx, "Telegram来源交付Worker已启动", g.Map{
 		"event": "collect_delivery_worker_started", "queueAdapter": "sourcequeue",
 		"realtimeConcurrency": collectorDeliveryConcurrency(runtimeCtx),
+		"freshEnabled":        deliveryFreshEnabled(),
 		"historyConcurrency":  historyWorkers, "legacyConcurrency": legacyWorkers,
 	})
 }
@@ -85,14 +96,21 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	return s.enqueueDeliveryTaskToQueue(ctx, deliveryID, priority, unique, "")
 }
 
-// All producers, replay and recovery use source-isolated lanes. The explicit
-// queue argument remains API-compatible but cannot route work back to Asynq.
+// All producers use source-isolated lanes. Only a verified first realtime
+// handoff may request fresh placement; recovery never upgrades existing work.
 func (s *sCollector) enqueueDeliveryTaskToQueue(ctx context.Context, deliveryID int64, priority int, unique bool, explicitQueue string) (err error) {
 	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryEnqueue, collectorObservationMeta{DeliveryID: deliveryID})
 	observeResult := collectorResultError
 	defer func() { observation.Finish(observeResult, err) }()
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
-	// Legacy unique/explicitQueue inputs cannot route new work to Asynq.
+	// History/recovery cannot become fresh merely because the persisted priority is high.
+	if explicitQueue == consts.QueueDeliveryFresh && deliveryFreshEnabled() {
+		if recovery, _ := ctx.Value(deliverySourceRecoveryKey{}).(bool); !recovery {
+			if lane := deliverySourceLane(ctx, priority); lane != sourcequeue.History && priority >= sysin.EventPriorityRealtime {
+				ctx = withCollectorSourceLane(ctx, sourcequeue.Fresh)
+			}
+		}
+	}
 	// Source queue IDs coalesce until ACK, including replay and recovery.
 	err = s.enqueueDeliverySourceTask(ctx, deliveryID, priority)
 	if err == nil {
@@ -245,16 +263,19 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	columns := dao.TgCollectorDelivery.Columns()
 	now := gtime.Now()
 	executionOwner := guid.S()
-	result, err := dao.TgCollectorDelivery.Ctx(ctx).
+	claim := dao.TgCollectorDelivery.Ctx(ctx).
 		WherePri(deliveryID).
-		WhereIn(columns.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry}).
-		Data(g.Map{
-			columns.Status:       sysin.DeliveryStatusProcessing,
-			columns.LeaseOwner:   executionOwner,
-			columns.LeaseUntil:   now.Add(deliveryLeaseDuration),
-			columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
-			columns.UpdatedAt:    now,
-		}).Update()
+		WhereIn(columns.Status, []string{sysin.DeliveryStatusPending, sysin.DeliveryStatusFailedRetry})
+	if sourceRow != nil {
+		claim = claim.Where("("+columns.NextRunAt+" IS NULL OR "+columns.NextRunAt+" <= ?)", now)
+	}
+	result, err := claim.Data(g.Map{
+		columns.Status:       sysin.DeliveryStatusProcessing,
+		columns.LeaseOwner:   executionOwner,
+		columns.LeaseUntil:   now.Add(deliveryLeaseDuration),
+		columns.AttemptCount: gdb.Raw(columns.AttemptCount + "+1"),
+		columns.UpdatedAt:    now,
+	}).Update()
 	claimDuration := time.Since(claimStarted).Milliseconds()
 	if err != nil {
 		recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultError, time.Since(claimStarted), err)
@@ -272,6 +293,17 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 		observeResult = collectorResultSkipped
 		logCollectorDeliveryStage(ctx, "delivery.claim.skipped", deliveryID, 0, collectorQueueName(ctx), nil,
 			g.Map{"claimDurationMs": claimDuration, "taskDurationMs": time.Since(taskStarted).Milliseconds()})
+		if sourceRow != nil {
+			var current entity.TgCollectorDelivery
+			if err := dao.TgCollectorDelivery.Ctx(ctx).Fields(columns.Status, columns.NextRunAt).
+				WherePri(deliveryID).Scan(&current); err != nil {
+				return gerror.Wrap(err, "复查Telegram采集交付重试时间失败")
+			}
+			if (current.Status == sysin.DeliveryStatusPending || current.Status == sysin.DeliveryStatusFailedRetry) &&
+				current.NextRunAt != nil {
+				return &deliveryNotDueError{at: current.NextRunAt.Time}
+			}
+		}
 		return nil
 	}
 	recordCollectorStage(ctx, collectorStageDeliveryClaim, observation.meta, collectorResultOK, time.Since(claimStarted), nil)
@@ -393,24 +425,30 @@ func (s *sCollector) processDeliveryWithEvent(ctx context.Context, deliveryID in
 	logCollectorDeliveryStage(ctx, "delivery.handler.completed", deliveryID, row.EventId, queueName, nil,
 		g.Map{"handlerDurationMs": time.Since(handlerStarted).Milliseconds(), "taskDurationMs": time.Since(taskStarted).Milliseconds()})
 	completeStarted := time.Now()
-	completeResult, completeErr := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
-		Where(columns.Status, sysin.DeliveryStatusProcessing).
-		Where(columns.LeaseOwner, executionOwner).Data(g.Map{
-		columns.Status:       sysin.DeliveryStatusCompleted,
-		columns.NextRunAt:    nil,
-		columns.LeaseOwner:   "",
-		columns.LeaseUntil:   nil,
-		columns.ErrorMessage: "",
-		columns.UpdatedAt:    gtime.Now(),
-	}).Update()
-	err = completeErr
-	if err == nil {
-		var affected int64
-		affected, err = completeResult.RowsAffected()
-		if err != nil {
-			err = gerror.Wrap(err, "确认Telegram采集交付完成结果失败")
-		} else if affected != 1 {
-			err = gerror.New("采集交付执行归属已变化，未确认本次完成")
+	if !delivery.History && queueName != "" && !eventQueueIsHistory(queueName) &&
+		g.Cfg().MustGet(ctx, "telegramCollector.worker.realtimeDeliveryBatchEnabled", false).Bool() &&
+		g.DB().GetConfig().Type == "pgsql" {
+		err = s.completeRealtimeDelivery(ctx, deliveryCompletion{ID: deliveryID, Owner: executionOwner})
+	} else {
+		completeResult, completeErr := dao.TgCollectorDelivery.Ctx(ctx).WherePri(deliveryID).
+			Where(columns.Status, sysin.DeliveryStatusProcessing).
+			Where(columns.LeaseOwner, executionOwner).Data(g.Map{
+			columns.Status:       sysin.DeliveryStatusCompleted,
+			columns.NextRunAt:    nil,
+			columns.LeaseOwner:   "",
+			columns.LeaseUntil:   nil,
+			columns.ErrorMessage: "",
+			columns.UpdatedAt:    gtime.Now(),
+		}).Update()
+		err = completeErr
+		if err == nil {
+			var affected int64
+			affected, err = completeResult.RowsAffected()
+			if err != nil {
+				err = gerror.Wrap(err, "确认Telegram采集交付完成结果失败")
+			} else if affected != 1 {
+				err = gerror.New("采集交付执行归属已变化，未确认本次完成")
+			}
 		}
 	}
 	recordCollectorStage(ctx, collectorStageDeliveryComplete, observation.meta, collectorResultOK, time.Since(completeStarted), err)
@@ -577,13 +615,6 @@ func (s *sCollector) recoverDeliveryTasks(ctx context.Context) {
 		"workerRole": "collector-delivery-worker",
 	}
 	g.Log().Debug(ctx, "Telegram采集交付恢复开始", fields)
-	if err := s.resetExpiredDeliveryLeases(ctx, limit); err != nil {
-		fields["stage"] = "recovery.lease_reset_failed"
-		fields["status"] = "error"
-		fields["errorType"] = fmt.Sprintf("%T", err)
-		fields["error"] = err.Error()
-		g.Log().Warning(ctx, "恢复超时Telegram采集交付失败，下一轮将重试", fields)
-	}
 	if err := s.enqueueDueDeliveryTasks(ctx, limit); err != nil {
 		fields["stage"] = "recovery.enqueue_failed"
 		fields["status"] = "error"
@@ -597,20 +628,66 @@ func (s *sCollector) recoverDeliveryTasks(ctx context.Context) {
 	g.Log().Debug(ctx, "Telegram采集交付恢复完成", fields)
 }
 
-func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int) error {
-	scopes, err := collectorRecoveryScopes(ctx, collectorRecoveryDeliveryLease, 8)
-	if err != nil {
-		return err
+// Lease rotation has its own clock so re-enqueue cannot delay the next page.
+func (s *sCollector) runDeliveryLeaseRecovery(ctx context.Context) {
+	interval, scopeTimeout := deliveryRecoveryInterval, 5*time.Second
+	probeCtx, stopProbe := context.WithTimeout(ctx, time.Second)
+	indexReady, probeErr := dao.TgCollectorDelivery.DB().GetValue(probeCtx, `SELECT EXISTS (
+ SELECT 1 FROM pg_index WHERE indrelid=to_regclass(?)
+   AND indexrelid=to_regclass('idx_tg_delivery_scope_lease_recovery')
+   AND indisvalid AND indisready
+)`, dao.TgCollectorDelivery.Table())
+	stopProbe()
+	if probeErr == nil && indexReady.Bool() {
+		interval, scopeTimeout = deliveryLeaseRecoveryInterval, deliveryLeaseRecoveryScopeTimeout
+	} else if ctx.Err() == nil {
+		g.Log().Warning(ctx, "交付租约恢复使用常规频率，来源索引尚未确认", g.Map{
+			"event": "delivery_lease_recovery_index_unavailable",
+			"index": "idx_tg_delivery_scope_lease_recovery",
+		})
 	}
-	for _, scope := range scopes {
-		laneCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err := s.resetExpiredDeliveryLeasesForScope(laneCtx, min(16, limit), scope)
-		cancel()
-		if err != nil {
-			g.Log().Warning(ctx, "来源交付租约恢复失败", g.Map{"scope": scope.key(), "error": err.Error()})
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.resetExpiredDeliveryLeases(ctx, collectorRecoveryBatchSize(ctx), scopeTimeout); err != nil && ctx.Err() == nil {
+				g.Log().Warning(ctx, "恢复超时Telegram采集交付失败，下一轮将重试", g.Map{
+					"stage": "recovery.lease_reset_failed", "error": err.Error(),
+				})
+			}
 		}
 	}
-	return nil
+}
+
+func (s *sCollector) resetExpiredDeliveryLeases(ctx context.Context, limit int, scopeTimeout time.Duration) error {
+	if limit <= 0 {
+		return nil
+	}
+	scopeCtx, cancelScopes := context.WithTimeout(ctx, time.Second)
+	scopes, err := collectorRecoveryScopes(scopeCtx, collectorRecoveryDeliveryLease, min(deliveryLeaseRecoveryScopeLimit, limit))
+	cancelScopes()
+	if err != nil || len(scopes) == 0 {
+		return err
+	}
+
+	// Reserve a share for every selected scope, including with a small budget.
+	quota := min(16, limit/len(scopes))
+	var recoveryErr error
+	for _, scope := range scopes {
+		if ctx.Err() != nil {
+			return errors.Join(recoveryErr, ctx.Err())
+		}
+		laneCtx, cancel := context.WithTimeout(ctx, scopeTimeout)
+		err := s.resetExpiredDeliveryLeasesForScope(laneCtx, quota, scope)
+		cancel()
+		if err != nil {
+			recoveryErr = errors.Join(recoveryErr, gerror.Wrapf(err, "来源 %s", scope.key()))
+		}
+	}
+	return recoveryErr
 }
 
 func (s *sCollector) resetExpiredDeliveryLeasesForScope(ctx context.Context, limit int, scope collectorRecoveryScope) error {
@@ -618,46 +695,38 @@ func (s *sCollector) resetExpiredDeliveryLeasesForScope(ctx context.Context, lim
 		return nil
 	}
 
-	columns := dao.TgCollectorDelivery.Columns()
-	now := gtime.Now()
-	rows, err := dao.TgCollectorDelivery.Ctx(ctx).
-		Fields(columns.Id, columns.AttemptCount).
-		Where(columns.TenantId, scope.TenantID).Where("account_id", scope.AccountID).Where("source_id", scope.SourceID).
-		Where(columns.Status, sysin.DeliveryStatusProcessing).
-		WhereNotNull(columns.LeaseUntil).
-		WhereLTE(columns.LeaseUntil, now).
-		OrderAsc(columns.LeaseUntil).
-		Limit(limit).
-		All()
+	// Limit candidates before attempting locks. Tuple identity pins the
+	// selected lease version so a renewed or completed delivery is untouched.
+	c := dao.TgCollectorDelivery.Columns()
+	table := dao.TgCollectorDelivery.Table()
+	query := fmt.Sprintf(`WITH candidates AS MATERIALIZED (
+ SELECT ctid AS tid FROM %[1]s
+ WHERE %[2]s=? AND account_id=? AND source_id=?
+   AND %[3]s='processing' AND %[4]s IS NOT NULL AND %[4]s<=CAST(? AS timestamp)
+ ORDER BY %[4]s, %[5]s
+ LIMIT ?
+), locked AS MATERIALIZED (
+ SELECT picked.tid FROM candidates
+ CROSS JOIN LATERAL (
+  SELECT d.ctid AS tid FROM %[1]s d
+  WHERE d.ctid=candidates.tid
+  FOR UPDATE SKIP LOCKED
+ ) picked
+)
+UPDATE %[1]s d
+SET %[3]s=CASE WHEN d.%[6]s>=? THEN ? ELSE ? END,
+    %[7]s=CASE WHEN d.%[6]s>=? THEN NULL ELSE CAST(? AS timestamp) END,
+    %[8]s='', %[4]s=NULL, %[9]s=?, %[10]s=CAST(? AS timestamp)
+FROM locked WHERE d.ctid=locked.tid`,
+		table, c.TenantId, c.Status, c.LeaseUntil, c.Id, c.AttemptCount,
+		c.NextRunAt, c.LeaseOwner, c.ErrorMessage, c.UpdatedAt)
+	now := gtime.Now().String()
+	_, err := dao.TgCollectorDelivery.DB().Exec(ctx, query,
+		scope.TenantID, scope.AccountID, scope.SourceID, now, limit,
+		deliveryMaxAttempts, sysin.DeliveryStatusDead, sysin.DeliveryStatusFailedRetry,
+		deliveryMaxAttempts, now, "处理租约超时，已自动恢复", now)
 	if err != nil {
-		return gerror.Wrap(err, "读取超时Telegram采集交付失败")
-	}
-	for _, row := range rows {
-		deliveryID := row[columns.Id].Int64()
-		if deliveryID <= 0 {
-			continue
-		}
-		status := sysin.DeliveryStatusFailedRetry
-		var nextRunAt any = now
-		if row[columns.AttemptCount].Int() >= deliveryMaxAttempts {
-			status = sysin.DeliveryStatusDead
-			nextRunAt = nil
-		}
-		_, updateErr := dao.TgCollectorDelivery.Ctx(ctx).
-			WherePri(deliveryID).
-			Where(columns.Status, sysin.DeliveryStatusProcessing).
-			WhereLTE(columns.LeaseUntil, now).
-			Data(g.Map{
-				columns.Status:       status,
-				columns.NextRunAt:    nextRunAt,
-				columns.LeaseOwner:   "",
-				columns.LeaseUntil:   nil,
-				columns.ErrorMessage: "处理租约超时，已自动恢复",
-				columns.UpdatedAt:    now,
-			}).Update()
-		if updateErr != nil {
-			return gerror.Wrap(updateErr, "重置超时Telegram采集交付失败")
-		}
+		return gerror.Wrap(err, "重置超时Telegram采集交付失败")
 	}
 	return nil
 }

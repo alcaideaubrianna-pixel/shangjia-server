@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -12,6 +13,7 @@ import (
 	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	twowaymodel "hotgo/addons/youban_two_way_bot/model"
 	"hotgo/addons/youban_two_way_bot/model/input/sysin"
+	"hotgo/internal/library/botregistry"
 )
 
 func (s *sSysTwoWayBot) AdminBotList(ctx context.Context, in *sysin.BotListInp) (list []*sysin.BotModel, totalCount int, err error) {
@@ -78,6 +80,12 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	if err != nil {
 		return err
 	}
+	if old != nil {
+		oldIdentity, _, _ := strings.Cut(strings.TrimSpace(old.BotToken), ":")
+		if oldIdentity != botUserId {
+			return gerror.New("只允许更新同一个Telegram机器人的Token")
+		}
+	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		name = botDisplayName
@@ -88,82 +96,159 @@ func (s *sSysTwoWayBot) AdminBotSave(ctx context.Context, in *sysin.BotSaveInp) 
 	if name == "" {
 		name = "双向机器人"
 	}
-	now := gtime.Now()
-	setupStatus := sysin.TwoWayBotSetupReady
-	supergroupId := strings.TrimSpace(in.SupergroupId)
-	supergroupTitle := strings.TrimSpace(in.SupergroupTitle)
-	inviteLink := strings.TrimSpace(in.InviteLink)
-	supergroupAccessHash := ""
-	if in.Id <= 0 {
-		tgAccount, err := tgAccountById(ctx, in.TgAccountId, account.TenantId)
-		if err != nil {
-			return err
-		}
-		var setup *setupGroupResult
-		if in.ExistingGroupId != "" {
-			setup, err = s.setupExistingManagementGroup(ctx, account, tgAccount, in.ExistingGroupId, botUsername)
+	var supergroupId string
+	savedID := in.Id
+	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		var sourceID int64
+		if in.Id <= 0 {
+			rows, err := tx.Model(publishBotTable).Ctx(ctx).
+				Fields("id", "account_id", "bot_type", "supergroup_id").
+				Where("tenant_id", account.TenantId).WhereNull("deleted_at").
+				WhereLike("bot_token", botUserId+":%").OrderAsc("id").LockUpdate().Limit(2).All()
+			if err != nil {
+				return gerror.Wrap(err, "查询已登记的机器人失败")
+			}
+			if len(rows) == 0 {
+				return gerror.New("请先在Bot Token配置中登记机器人")
+			}
+			if len(rows) > 1 {
+				return gerror.New("同一Telegram机器人存在多条配置，请先处理历史重复记录")
+			}
+			row := rows[0]
+			sourceID = row["id"].Int64()
+			ownerID := row["account_id"].Int64()
+			if ownerID != 0 && ownerID != account.Id {
+				return gerror.New("该机器人不属于当前账户")
+			}
+			switch row["bot_type"].String() {
+			case "two_way":
+				savedID = sourceID
+				supergroupId = row["supergroup_id"].String()
+				return nil
+			case "", "normal":
+			default:
+				return gerror.New("该机器人已配置其他角色，无法添加双向机器人")
+			}
+			used, err := tx.Model("hg_youban_publish_collect_source").Ctx(ctx).
+				Where("tenant_id", account.TenantId).Where("bot_id", sourceID).
+				Where("source_type", "bot").WhereNull("deleted_at").Exist()
+			if err != nil {
+				return gerror.Wrap(err, "检查机器人采集配置失败")
+			}
+			if used {
+				return gerror.New("该机器人已配置为采集机器人，无法添加双向机器人")
+			}
 		} else {
-			setup, err = s.createManagementGroup(ctx, account, tgAccount, botUsername)
+			row, err := tx.Model(publishBotTable).Ctx(ctx).WherePri(in.Id).
+				Where("tenant_id", account.TenantId).Where("account_id", account.Id).
+				Where("bot_type", "two_way").WhereNull("deleted_at").LockUpdate().One()
+			if err != nil {
+				return err
+			}
+			if row.IsEmpty() || row["bot_token"].String() != old.BotToken {
+				return gerror.New("机器人配置已变更，请刷新后重试")
+			}
 		}
-		if err != nil {
+		if err := botregistry.Claim(ctx, token, account.TenantId, botregistry.RoleRelay); err != nil {
 			return err
 		}
-		supergroupId = setup.SupergroupId
-		supergroupAccessHash = fmt.Sprintf("%d", setup.AccessHash)
-		supergroupTitle = setup.Title
-		inviteLink = setup.InviteLink
-	} else if old != nil {
-		if in.Status == nil {
-			status := old.Status
-			in.Status = &status
+		now := gtime.Now()
+		setupStatus := sysin.TwoWayBotSetupReady
+		supergroupId = strings.TrimSpace(in.SupergroupId)
+		supergroupTitle := strings.TrimSpace(in.SupergroupTitle)
+		inviteLink := strings.TrimSpace(in.InviteLink)
+		supergroupAccessHash := ""
+		if in.Id <= 0 {
+			tgAccount, err := tgAccountById(ctx, in.TgAccountId, account.TenantId)
+			if err != nil {
+				return err
+			}
+			var setup *setupGroupResult
+			if in.ExistingGroupId != "" {
+				setup, err = s.setupExistingManagementGroup(ctx, account, tgAccount, in.ExistingGroupId, botUsername)
+			} else {
+				setup, err = s.createManagementGroup(ctx, account, tgAccount, botUsername)
+			}
+			if err != nil {
+				return err
+			}
+			supergroupId = setup.SupergroupId
+			supergroupAccessHash = fmt.Sprintf("%d", setup.AccessHash)
+			supergroupTitle = setup.Title
+			inviteLink = setup.InviteLink
+		} else if old != nil {
+			if in.Status == nil {
+				status := old.Status
+				in.Status = &status
+			}
+			supergroupAccessHash = old.SupergroupAccessHash
+			if supergroupId == "" {
+				supergroupId = old.SupergroupId
+			}
+			if supergroupTitle == "" {
+				supergroupTitle = old.SupergroupTitle
+			}
+			if inviteLink == "" {
+				inviteLink = old.InviteLink
+			}
 		}
-		supergroupAccessHash = old.SupergroupAccessHash
-		if supergroupId == "" {
-			supergroupId = old.SupergroupId
+		status := sysin.TwoWayBotStatusEnabled
+		if in.Status != nil {
+			status = *in.Status
 		}
-		if supergroupTitle == "" {
-			supergroupTitle = old.SupergroupTitle
+		data := g.Map{
+			"tenant_id":              account.TenantId,
+			"account_id":             account.Id,
+			"tg_account_id":          in.TgAccountId,
+			"bot_name":               name,
+			"bot_type":               "two_way",
+			"welcome_message":        in.WelcomeMessage,
+			"bot_token":              token,
+			"bot_user_id":            botUserId,
+			"bot_username":           botUsername,
+			"supergroup_id":          supergroupId,
+			"supergroup_access_hash": supergroupAccessHash,
+			"supergroup_title":       supergroupTitle,
+			"invite_link":            inviteLink,
+			"setup_status":           setupStatus,
+			"last_setup_at":          now,
+			"status":                 status,
+			"error_message":          "",
+			"updated_at":             now,
 		}
-		if inviteLink == "" {
-			inviteLink = old.InviteLink
+		if in.Id > 0 {
+			result, err := tx.Model(publishBotTable).Safe().Ctx(ctx).WherePri(in.Id).Where("tenant_id", account.TenantId).Where("account_id", account.Id).Where("bot_type", "two_way").WhereNull("deleted_at").Data(data).Update()
+			if err != nil {
+				return gerror.Wrap(err, "更新双向机器人失败")
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return gerror.Wrap(err, "确认双向机器人更新结果失败")
+			}
+			if affected == 0 {
+				return gerror.New("双向机器人不存在或不属于当前账户")
+			}
+		} else {
+			result, err := tx.Model(publishBotTable).Ctx(ctx).WherePri(sourceID).
+				Where("tenant_id", account.TenantId).WhereNull("deleted_at").Data(data).Update()
+			if err != nil {
+				return gerror.Wrap(err, "保存双向机器人角色失败")
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				return gerror.New("原机器人配置已变更，请刷新后重试")
+			}
+			savedID = sourceID
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	status := sysin.TwoWayBotStatusEnabled
-	if in.Status != nil {
-		status = *in.Status
-	}
-	data := g.Map{
-		"tenant_id":              account.TenantId,
-		"account_id":             account.Id,
-		"tg_account_id":          in.TgAccountId,
-		"bot_name":               name,
-		"bot_type":               "two_way",
-		"welcome_message":        in.WelcomeMessage,
-		"bot_token":              token,
-		"bot_user_id":            botUserId,
-		"bot_username":           botUsername,
-		"supergroup_id":          supergroupId,
-		"supergroup_access_hash": supergroupAccessHash,
-		"supergroup_title":       supergroupTitle,
-		"invite_link":            inviteLink,
-		"setup_status":           setupStatus,
-		"last_setup_at":          now,
-		"status":                 status,
-		"error_message":          "",
-		"updated_at":             now,
-	}
-	if in.Id > 0 {
-		if _, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).WherePri(in.Id).Where("tenant_id", account.TenantId).Where("account_id", account.Id).Where("bot_type", "two_way").Data(data).Update(); err != nil {
-			return gerror.Wrap(err, "更新双向机器人失败")
-		}
-	} else {
-		data["created_at"] = now
-		data["account_id"] = account.Id
-		data["created_by"] = account.Id
-		if in.Id, err = g.DB().Model(publishBotTable).Safe().Ctx(ctx).Data(data).InsertAndGetId(); err != nil {
-			return gerror.Wrap(err, "创建双向机器人失败")
-		}
-	}
+	in.Id = savedID
 	if supergroupId != "" {
 		return s.syncRuntimeById(ctx, in.Id, account.TenantId)
 	}

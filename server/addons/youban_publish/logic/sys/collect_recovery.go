@@ -1313,12 +1313,9 @@ func shouldRecoverCollectEvent(row gdb.Record) bool {
 }
 
 var (
-	collectEventTerminalFailureMessages = []string{
-		"未找到原消息",
-		"无法刷新文件引用",
-		"缺少原消息引用",
-		"缺少下载元数据",
-	}
+	collectEventTerminalFailureMessages = append([]string{
+		"未找到原消息", "无法刷新文件引用", "缺少原消息引用", "缺少下载元数据",
+	}, collectProcessingTerminalMessages...)
 	collectEventRecoverableFailureMessages = []string{
 		"app_id",
 		"资料指纹索引正在初始化",

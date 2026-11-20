@@ -96,6 +96,8 @@ type ISysBot interface {
 	MyInviteList(ctx context.Context, in *sysin.InviteListInp) (list []*sysin.InviteModel, totalCount int, err error)
 	CreateInviteCode(ctx context.Context, in *sysin.InviteCreateInp) (res *sysin.InviteCreateModel, err error)
 	Notify(ctx context.Context, in *sysin.NotifyInp) (err error)
+	DeliverBotProfileApproval(ctx context.Context, review *publishsysin.BotProfileReview) error
+	DeliverUploaderReviewNotice(ctx context.Context, in *publishsysin.UploaderReviewNotice) error
 	NotifyAccount(ctx context.Context, in *sysin.NotifyAccountInp) (err error)
 	NotifyAccounts(ctx context.Context, in *sysin.NotifyAccountsInp) (err error)
 	NotifyRich(ctx context.Context, in *sysin.NotifyRichInp) (err error)
