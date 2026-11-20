@@ -77,6 +77,7 @@ func (s *sCollector) StartDeliveryRuntime(ctx context.Context) {
 	g.Log().Info(runtimeCtx, "Telegram来源交付Worker已启动", g.Map{
 		"event": "collect_delivery_worker_started", "queueAdapter": "sourcequeue",
 		"realtimeConcurrency": collectorDeliveryConcurrency(runtimeCtx),
+		"freshEnabled":        deliveryFreshEnabled(),
 		"historyConcurrency":  historyWorkers, "legacyConcurrency": legacyWorkers,
 	})
 }
@@ -91,14 +92,21 @@ func (s *sCollector) enqueueDeliveryTaskWithOptions(ctx context.Context, deliver
 	return s.enqueueDeliveryTaskToQueue(ctx, deliveryID, priority, unique, "")
 }
 
-// All producers, replay and recovery use source-isolated lanes. The explicit
-// queue argument remains API-compatible but cannot route work back to Asynq.
+// All producers use source-isolated lanes. Only a verified first realtime
+// handoff may request fresh placement; recovery never upgrades existing work.
 func (s *sCollector) enqueueDeliveryTaskToQueue(ctx context.Context, deliveryID int64, priority int, unique bool, explicitQueue string) (err error) {
 	ctx, observation := startCollectorStage(ctx, collectorStageDeliveryEnqueue, collectorObservationMeta{DeliveryID: deliveryID})
 	observeResult := collectorResultError
 	defer func() { observation.Finish(observeResult, err) }()
 	observation.meta.QueueClass = collectorObserveQueueClassFromPriority(priority)
-	// Legacy unique/explicitQueue inputs cannot route new work to Asynq.
+	// History/recovery cannot become fresh merely because the persisted priority is high.
+	if explicitQueue == consts.QueueDeliveryFresh && deliveryFreshEnabled() {
+		if recovery, _ := ctx.Value(deliverySourceRecoveryKey{}).(bool); !recovery {
+			if lane := deliverySourceLane(ctx, priority); lane != sourcequeue.History && priority >= sysin.EventPriorityRealtime {
+				ctx = withCollectorSourceLane(ctx, sourcequeue.Fresh)
+			}
+		}
+	}
 	// Source queue IDs coalesce until ACK, including replay and recovery.
 	err = s.enqueueDeliverySourceTask(ctx, deliveryID, priority)
 	if err == nil {

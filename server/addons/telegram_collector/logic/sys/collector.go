@@ -66,6 +66,9 @@ func collectorQueueName(ctx context.Context) string {
 	// Preserve the business execution lane for handlers shared with the legacy
 	// Asynq adapter. The source scope and actual adapter are logged separately.
 	if lane, ok := collectorSourceLaneFromContext(ctx); ok {
+		if lane == sourcequeue.Fresh {
+			return consts.QueueDeliveryFresh
+		}
 		if lane == sourcequeue.History {
 			return consts.QueueDeliveryHistory
 		}

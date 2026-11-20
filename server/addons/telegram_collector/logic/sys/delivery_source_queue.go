@@ -98,7 +98,7 @@ func (s *sCollector) enqueueDeliverySourceTask(ctx context.Context, id int64, pr
 	if scope.TenantID <= 0 || scope.SourceID <= 0 {
 		return gerror.New("交付缺少租户或来源，禁止回退共享队列")
 	}
-	lane := deliverySourceLane(ctx, priority)
+	lane := deliverySourceEnqueueLane(ctx, priority)
 	payload, err := json.Marshal(deliverySourcePayload{id, scope.TenantID, scope.SourceID, collectorTaskPayloadForEnqueue(ctx, id, true)})
 	if err != nil {
 		return gerror.Wrap(err, "编码来源交付任务失败")
@@ -110,13 +110,19 @@ func (s *sCollector) enqueueDeliverySourceTask(ctx context.Context, id int64, pr
 	ctx = withCollectorSourceLane(withCollectorSourceScope(ctx, scope.TenantID, scope.SourceID), lane)
 	// DB recovery observes existing work in either lane without advancing its
 	// generation or promoting history. Ingress/replay must still publish new wakeups.
-	if recovery, _ := ctx.Value(deliverySourceRecoveryKey{}).(bool); recovery {
-		for _, existingLane := range []sourcequeue.Lane{sourcequeue.Realtime, sourcequeue.History} {
+	if recovery, _ := ctx.Value(deliverySourceRecoveryKey{}).(bool); recovery || lane == sourcequeue.Fresh {
+		for _, existingLane := range []sourcequeue.Lane{sourcequeue.Fresh, sourcequeue.Realtime, sourcequeue.History} {
 			exists, err := q.HasTask(ctx, scope, existingLane, strconv.FormatInt(id, 10))
 			if err != nil {
 				return err
 			}
 			if exists {
+				// A live ingress notification in its existing fresh lane still
+				// advances generation, so an in-flight ACK cannot swallow it.
+				// Recovery is observational and must never change that generation.
+				if !recovery && existingLane == lane {
+					break
+				}
 				logCollectorDeliveryEnqueue(ctx, id, deliverySourceLogicalQueue(existingLane), "already_queued", nil)
 				return nil
 			}
@@ -142,14 +148,31 @@ func (s *sCollector) migrateLegacyDeliveryTask(ctx context.Context, task *asynq.
 }
 
 func (s *sCollector) startDeliverySourcePools(ctx context.Context, q deliverySourceQueue, realtime, history int) {
+	fresh, backlog := deliverySourceRealtimeBudgets(realtime)
+	if !deliveryFreshEnabled() {
+		// Preserve the old budget before rollout, while retaining a bounded drainer
+		// for any fresh work accepted before the switch was disabled.
+		fresh, backlog = 0, max(1, realtime)
+	}
 	for _, pool := range []struct {
 		lane    sourcequeue.Lane
 		workers int
-	}{{sourcequeue.Realtime, realtime}, {sourcequeue.History, history}} {
+	}{
+		{sourcequeue.Fresh, fresh}, {sourcequeue.Realtime, backlog}, {sourcequeue.History, history},
+	} {
 		lane := pool.lane
 		for i := 0; i < pool.workers; i++ {
 			s.runtimeWG.Add(1)
-			go func() { defer s.runtimeWG.Done(); s.runDeliverySourceWorker(ctx, q, lane) }()
+			go func() {
+				defer s.runtimeWG.Done()
+				if lane == sourcequeue.Fresh && backlog == 0 {
+					s.runDeliverySourceWorker(ctx, q, lane, sourcequeue.Realtime)
+				} else if lane == sourcequeue.Realtime && !deliveryFreshEnabled() {
+					s.runDeliverySourceWorker(ctx, q, lane, sourcequeue.Fresh)
+				} else {
+					s.runDeliverySourceWorker(ctx, q, lane)
+				}
+			}()
 		}
 		s.runtimeWG.Add(1)
 		go func() { defer s.runtimeWG.Done(); runDeliverySourceRecovery(ctx, q, lane) }()
@@ -175,11 +198,15 @@ func runDeliverySourceRecovery(ctx context.Context, q deliverySourceQueue, lane 
 	}
 }
 
-func (s *sCollector) runDeliverySourceWorker(ctx context.Context, q deliverySourceQueue, lane sourcequeue.Lane) {
+func (s *sCollector) runDeliverySourceWorker(ctx context.Context, q deliverySourceQueue, lane sourcequeue.Lane, alternate ...sourcequeue.Lane) {
+	lanes := append([]sourcequeue.Lane{lane}, alternate...)
+	turn := 0
 	for ctx.Err() == nil {
-		claim, err := q.Claim(ctx, lane, deliveryLeaseDuration)
+		selected := lanes[turn%len(lanes)]
+		turn++
+		claim, err := q.Claim(ctx, selected, deliveryLeaseDuration)
 		if err != nil {
-			g.Log().Warning(ctx, "来源交付队列领取失败", g.Map{"lane": lane, "error": err.Error()})
+			g.Log().Warning(ctx, "来源交付队列领取失败", g.Map{"lane": selected, "error": err.Error()})
 			if !collectorSourceQueuePause(ctx, time.Second) {
 				return
 			}
@@ -192,12 +219,12 @@ func (s *sCollector) runDeliverySourceWorker(ctx context.Context, q deliverySour
 			continue
 		}
 		lease := deliveryLeaseDuration
-		if lane == sourcequeue.History {
+		if selected == sourcequeue.History {
 			lease = 5 * time.Second
 		}
-		err = executeDeliverySourceClaim(ctx, q, claim, lane, lease, s.processDelivery)
+		err = executeDeliverySourceClaim(ctx, q, claim, selected, lease, s.processDelivery)
 		if err != nil {
-			logCollectorDeliveryStage(ctx, "delivery.source.unconfirmed", 0, 0, "", err, g.Map{"tenantId": claim.Scope.TenantID, "sourceId": claim.Scope.SourceID, "taskId": claim.ID, "lane": lane})
+			logCollectorDeliveryStage(ctx, "delivery.source.unconfirmed", 0, 0, "", err, g.Map{"tenantId": claim.Scope.TenantID, "sourceId": claim.Scope.SourceID, "taskId": claim.ID, "lane": selected})
 			if !collectorSourceQueuePause(ctx, time.Second) {
 				return
 			}
@@ -229,6 +256,12 @@ func executeDeliverySourceClaim(ctx context.Context, q deliverySourceQueue, clai
 		busy, err := q.HasImmediateWork(ctx, claim.Scope, sourcequeue.Realtime)
 		if err != nil {
 			return err
+		}
+		if !busy {
+			busy, err = q.HasImmediateWork(ctx, claim.Scope, sourcequeue.Fresh)
+			if err != nil {
+				return err
+			}
 		}
 		if busy {
 			interval := deliverySourceHistoryBusyInterval(claim.Scope)
@@ -313,6 +346,9 @@ func executeDeliverySourceClaim(ctx context.Context, q deliverySourceQueue, clai
 
 // Logical names deliberately match existing business pool classification.
 func deliverySourceLogicalQueue(lane sourcequeue.Lane) string {
+	if lane == sourcequeue.Fresh {
+		return consts.QueueDeliveryFresh
+	}
 	if lane == sourcequeue.History {
 		return consts.QueueDeliveryHistory
 	}

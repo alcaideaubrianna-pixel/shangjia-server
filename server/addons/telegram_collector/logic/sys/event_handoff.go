@@ -158,7 +158,7 @@ func (s *sCollector) handoffCollectorEvent(ctx context.Context, row *entity.TgCo
 			return nil
 		},
 		enqueue: func(ctx context.Context, id int64) error {
-			if firstFreshDeliveryHandoff(row.AttemptCount, collectorQueueName(ctx), delivery) {
+			if firstFreshSourceHandoff(ctx, row.AttemptCount, collectorQueueName(ctx), delivery) {
 				return s.enqueueDeliveryTaskToQueue(ctx, id, deliveryPriority(delivery), true, consts.QueueDeliveryFresh)
 			}
 			return s.enqueueDeliveryTask(ctx, id, deliveryPriority(delivery))

@@ -27,6 +27,9 @@ type Scope struct {
 type Lane string
 
 const (
+	// Fresh isolates newly received work from an existing realtime backlog.
+	// Consumers choose its budget explicitly; this package never migrates work.
+	Fresh    Lane = "fresh"
 	Realtime Lane = "realtime"
 	History  Lane = "history"
 )
@@ -76,7 +79,7 @@ func validate(scope Scope, lane Lane) error {
 	return validateLane(lane)
 }
 func validateLane(lane Lane) error {
-	if lane != Realtime && lane != History {
+	if lane != Fresh && lane != Realtime && lane != History {
 		return gerror.New("来源队列通道无效")
 	}
 	return nil
@@ -352,8 +355,9 @@ func (q *Queue) CancelScope(ctx context.Context, scope Scope) error {
 		return err
 	}
 	keys := append(q.keys(scope, Realtime), q.keys(scope, History)...)
+	keys = append(keys, q.keys(scope, Fresh)...)
 	_, err := q.eval(ctx, `
-for offset=0,10,10 do
+for offset=0,20,10 do
  redis.call('ZREM',KEYS[offset+1],ARGV[1])
  redis.call('ZREM',KEYS[offset+3],ARGV[1])
  redis.call('UNLINK',KEYS[offset+5],KEYS[offset+6],KEYS[offset+7],KEYS[offset+8],KEYS[offset+9],KEYS[offset+10])

@@ -38,7 +38,7 @@ func withCollectorSourceLane(ctx context.Context, lane sourcequeue.Lane) context
 
 func collectorSourceLaneFromContext(ctx context.Context) (sourcequeue.Lane, bool) {
 	lane, ok := ctx.Value(collectorSourceLaneKey{}).(sourcequeue.Lane)
-	return lane, ok && (lane == sourcequeue.Realtime || lane == sourcequeue.History)
+	return lane, ok && (lane == sourcequeue.Realtime || lane == sourcequeue.History || lane == sourcequeue.Fresh)
 }
 
 // Keep lane identity independent of the persisted event's original priority.
