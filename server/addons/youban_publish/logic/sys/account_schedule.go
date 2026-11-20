@@ -358,13 +358,24 @@ func reconcileTerminalTelegramOutboxes(ctx context.Context, scope publishAccount
 	if limit > 500 {
 		limit = 500
 	}
-	_, err := g.DB().Exec(ctx, `WITH candidates AS (
+	key := fmt.Sprintf("%s%d:%d", publishconsts.AccountScheduleOutboxEmptyPrefix, scope.TenantID, scope.AccountID)
+	if cache.Initialized() {
+		value, err := cache.Instance().Get(ctx, key)
+		if err != nil {
+			return err
+		}
+		if !value.IsNil() {
+			return nil
+		}
+	}
+	result, err := g.DB().Exec(ctx, `WITH candidates AS (
 		SELECT o.id
 		FROM `+publishTgOutboxTable+` o
 		JOIN `+publishTgJobTable+` j ON j.id=o.job_id
 		WHERE j.tenant_id=? AND j.account_id=?
 		  AND j.status IN ('sent','superseded','failed')
 		  AND o.status IN ('pending','processing')
+		  AND o.event_type='telegram_job.publish'
 		ORDER BY o.id
 		LIMIT ?
 	)
@@ -375,6 +386,15 @@ func reconcileTerminalTelegramOutboxes(ctx context.Context, scope publishAccount
 	WHERE o.id=c.id`, scope.TenantID, scope.AccountID, limit)
 	if err != nil {
 		return gerror.Wrap(err, "收口终态TG任务Outbox失败")
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return gerror.Wrap(err, "读取终态TG任务Outbox收口数量失败")
+	}
+	// Only empty passes cool down. A nonempty page may have more work and must
+	// continue on the next account turn. Primary completion callbacks are unchanged.
+	if changed == 0 && cache.Initialized() {
+		return cache.Instance().Set(ctx, key, true, 30*time.Second)
 	}
 	return nil
 }

@@ -10,4 +10,7 @@ const (
 	AccountScheduleCursorKey         = "youban_publish:account_schedule:cursor"
 	AccountScheduleLeasePrefix       = "youban_publish:account_schedule:lease:"
 	AccountScheduleMaintenancePrefix = "youban_publish:account_schedule:maintenance:"
+	AccountScheduleOutboxEmptyPrefix = "youban_publish:account_schedule:outbox_empty:"
+	PermissionRetentionCursorKey     = "youban_publish:permission_retention:cursor"
+	PermissionRetentionProbeKey      = "youban_publish:permission_retention:probe"
 )

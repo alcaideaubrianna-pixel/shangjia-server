@@ -363,12 +363,10 @@ func (s *sSysPublish) loadTargetCollectMaterialWindow(ctx context.Context, paylo
 		model := collectMaterialWindowModel(ctx, storagePayload, verifyOnly).
 			Where("e.account_id", targetAccount).
 			Where("e.source_message_id >= ?", target["source_message_id"].Int64()).
-			Where("(e.received_at >= ? OR (e.received_at IS NULL AND e.created_at >= ?))", eventAt.Add(-collectMaterialVerifyWindow()), eventAt.Add(-collectMaterialVerifyWindow())).
-			// Keep the timestamp predicate sargable for rows with and without
-			// received_at. COALESCE on the column forced PostgreSQL to evaluate
-			// the expression for a broad source range before applying LIMIT.
-			Where("(e.received_at <= ? OR (e.received_at IS NULL AND e.created_at <= ?))",
-				eventAt.Add(collectMaterialVerifyWindow()), eventAt.Add(collectMaterialVerifyWindow()))
+			Where("COALESCE(e.received_at,e.created_at) >= ?", eventAt.Add(-collectMaterialVerifyWindow())).
+			// Match the explicit scoped time-expression index in runtime_io_hotspots.pgsql.sql.
+			// The fallback for missing received_at and inclusive boundaries are unchanged.
+			Where("COALESCE(e.received_at,e.created_at) <= ?", eventAt.Add(collectMaterialVerifyWindow()))
 		// A new target is already serialized by its channel batch lease. Read
 		// passive unmatched verification immediately: its old polling cooldown
 		// must not hide it when the previously missing display has just arrived.
