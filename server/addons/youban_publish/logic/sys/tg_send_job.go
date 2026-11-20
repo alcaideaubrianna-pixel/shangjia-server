@@ -382,6 +382,14 @@ func (s *sSysPublish) sendTelegramJobLockedByChannel(ctx context.Context, jobId 
 	}
 	defer cancelBudget()
 	ctx = bounded
+	step = beginTelegramPublishStage(ctx, "job.check_operation_before_prepare")
+	checkCtx, cancelCheck := context.WithTimeout(ctx, 2*time.Second)
+	fenceErr := checkProfilePublishOperationBeforePrepare(checkCtx, job)
+	cancelCheck()
+	step.End(fenceErr)
+	if fenceErr != nil {
+		return s.handleTelegramJobError(ctx, job, fenceErr)
+	}
 	step = beginTelegramPublishStage(ctx, "job.can_send")
 	allowed, err := s.canSendTelegramJob(ctx, job)
 	step.End(err, g.Map{"allowed": allowed})
