@@ -114,6 +114,9 @@ func (s *sSysPublish) prepareTelegramAntiScanUploadFile(ctx context.Context, med
 	var lastCandidateErr error
 	for attempt := 0; attempt < telegramAntiScanCandidateAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
+			if bestCleanup != nil {
+				bestCleanup()
+			}
 			return "", nil, err
 		}
 		var protectedPath string

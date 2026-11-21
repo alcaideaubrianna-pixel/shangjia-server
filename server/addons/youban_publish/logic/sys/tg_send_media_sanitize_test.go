@@ -37,6 +37,82 @@ func TestPrepareTelegramAntiScanMediaSetTimeoutFallsBackWithoutCancelingPublish(
 	}
 }
 
+func TestPrepareTelegramAntiScanMediaSetReleasesSenderBeforeLateCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	item := &telegramMediaItem{
+		Id: 1, MediaType: "image", AntiScanEnabled: true, ForceUpload: true,
+		ProcessedAssetHash: "old", ProtectedHashKey: "old", ProtectedPHash: 1, ProtectedDHash: 2,
+	}
+	items := []*telegramMediaItem{item}
+	started, release, cleaned := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer close(release)
+	result := make(chan error, 1)
+	go func() {
+		result <- prepareTelegramAntiScanMediaSetWithTimeout(ctx, time.Second, func(_ context.Context, copy *telegramMediaItem) error {
+			close(started)
+			<-release
+			copy.PreparedUploadPath = "late"
+			copy.PreparedUploadCleanup = func() { close(cleaned) }
+			return nil
+		}, items)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("preparation did not start")
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error=%v want deadline exceeded", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("sender waited for preparation after its deadline")
+	}
+
+	fallbackTelegramAntiScanToOriginal(items)
+	if item.PreparedUploadPath != "" || item.ProcessedAssetHash != "" || item.ProtectedHashKey != "" || item.ProtectedPHash != 0 || item.ProtectedDHash != 0 {
+		t.Fatalf("fallback retained protected media metadata: %+v", item)
+	}
+	release <- struct{}{}
+	select {
+	case <-cleaned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late preparation leaked its temporary file")
+	}
+	if item.PreparedUploadPath != "" {
+		t.Fatal("late preparation mutated media owned by the sender")
+	}
+}
+
+func TestPrepareTelegramAntiScanMediaSetUsesDeadlineWhenSlotsAreFull(t *testing.T) {
+	slotCount := 0
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	defer func() {
+		for i := 0; i < slotCount; i++ {
+			<-telegramAntiScanPrepareSlots
+		}
+	}()
+	for slotCount < cap(telegramAntiScanPrepareSlots) {
+		select {
+		case telegramAntiScanPrepareSlots <- struct{}{}:
+			slotCount++
+		case <-timeout.C:
+			t.Fatal("a previous preparation did not release its slot")
+		}
+	}
+
+	item := &telegramMediaItem{Id: 1, MediaType: "image", AntiScanEnabled: true}
+	err := prepareTelegramAntiScanMediaSetWithTimeout(context.Background(), 10*time.Millisecond, func(context.Context, *telegramMediaItem) error {
+		return errors.New("preparation started without a slot")
+	}, []*telegramMediaItem{item})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v want deadline exceeded with all slots held", err)
+	}
+}
+
 func TestPrepareTelegramAntiScanUploadFileStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

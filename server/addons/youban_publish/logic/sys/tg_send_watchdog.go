@@ -189,7 +189,7 @@ func (s *sSysPublish) runTelegramSendWatchdog(ctx context.Context) {
 
 var telegramTimeoutCleanupClaimSQL = `WITH candidates AS (
  SELECT id FROM ` + publishTgJobTable + ` WHERE send_phase='timeout_cancelled'
- AND timeout_cleanup_at<=? ORDER BY timeout_cleanup_at,id
+ AND account_id>0 AND timeout_cleanup_at<=? ORDER BY timeout_cleanup_at,id
  LIMIT 10 FOR UPDATE SKIP LOCKED
  ) UPDATE ` + publishTgJobTable + ` j SET timeout_cleanup_at=?
  FROM candidates c WHERE j.id=c.id RETURNING j.*`
@@ -232,16 +232,13 @@ func (s *sSysPublish) cleanupTelegramSendTimeouts(ctx context.Context) {
 	}
 	var workers sync.WaitGroup
 	slots := make(chan struct{}, 4)
+schedule:
 	for _, job := range jobs {
-		// Invalid account rows are leased but never executed; their lease keeps
-		// them from blocking valid accounts at the front of the due index.
-		if job.AccountId <= 0 {
-			continue
+		select {
+		case <-batchCtx.Done():
+			break schedule
+		case slots <- struct{}{}:
 		}
-		if batchCtx.Err() != nil {
-			break
-		}
-		slots <- struct{}{}
 		workers.Add(1)
 		go func(job telegramJobRecord) {
 			defer workers.Done()

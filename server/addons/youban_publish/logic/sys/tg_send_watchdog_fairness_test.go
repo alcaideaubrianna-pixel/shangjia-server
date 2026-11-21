@@ -32,6 +32,9 @@ func TestTelegramTimeoutCleanupFairnessPostgres(t *testing.T) {
 		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + " VALUES (331,2,2,'timeout_cancelled',LOCALTIMESTAMP - interval '1 minute')"); err != nil {
 			return err
 		}
+		if _, err := tx.Exec("INSERT INTO " + publishTgJobTable + " SELECT i,1,0,'timeout_cancelled',LOCALTIMESTAMP - interval '2 minutes' FROM generate_series(332,481) i"); err != nil {
+			return err
+		}
 		now := time.Now()
 		found := false
 		for i := 0; i < 14; i++ {
@@ -45,6 +48,9 @@ func TestTelegramTimeoutCleanupFairnessPostgres(t *testing.T) {
 			for _, row := range rows {
 				if row["id"].Int64() <= 200 {
 					t.Fatal("completed NULL history was claimed")
+				}
+				if row["account_id"].Int64() <= 0 {
+					t.Fatal("unowned cleanup consumed a batch slot")
 				}
 				if row["account_id"].Int64() == 2 {
 					found = true

@@ -15,6 +15,8 @@ const (
 	telegramAntiScanLightweightTimeout = 2 * time.Minute
 )
 
+var telegramAntiScanPrepareSlots = make(chan struct{}, channelQueueWorkerConcurrency())
+
 // prepareTelegramAntiScanMediaSet is the job-level barrier for content
 // protection. It is intentionally called only when the channel policy enables
 // anti-scan. Every protected image (display and verify) is prepared before the
@@ -54,11 +56,15 @@ func prepareTelegramAntiScanMediaSetWithTimeout(
 ) error {
 	prepareCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	items := make([]*telegramMediaItem, 0)
+	var originals, items []*telegramMediaItem
 	for _, set := range mediaSets {
 		for _, item := range set {
 			if item != nil && item.AntiScanEnabled && isTelegramImageMedia(item.MediaType) {
-				items = append(items, item)
+				copy := *item
+				copy.PreparedUploadPath = ""
+				copy.PreparedUploadCleanup = nil
+				originals = append(originals, item)
+				items = append(items, &copy)
 			}
 		}
 	}
@@ -66,28 +72,55 @@ func prepareTelegramAntiScanMediaSetWithTimeout(
 		return nil
 	}
 	g.Log().Infof(ctx, "防扫图全量准备开始 mediaCount:%d", len(items))
-	// One damaged image must not cancel sibling preparation. The caller falls
-	// back the whole album after Wait, while the shared parent deadline still
-	// bounds every worker. A fail-fast group caused cancelled siblings to run
-	// their candidate retry loops repeatedly before the fallback could proceed.
-	group := new(errgroup.Group)
-	group.SetLimit(telegramMediaPrepareConcurrency)
-	for _, item := range items {
-		item := item
-		group.Go(func() error {
-			return prepare(prepareCtx, item)
-		})
+	// A timed-out worker owns its copies and temporary files until it exits.
+	// Only a complete result can transfer ownership to the sender.
+	// Keep the same process-wide ceiling even when a timed-out job leaves
+	// image work running while its channel moves on.
+	select {
+	case telegramAntiScanPrepareSlots <- struct{}{}:
+	case <-prepareCtx.Done():
+		return prepareCtx.Err()
 	}
-	if err := group.Wait(); err != nil {
+	done := make(chan error)
+	go func() {
+		defer func() { <-telegramAntiScanPrepareSlots }()
+		group := new(errgroup.Group)
+		group.SetLimit(telegramMediaPrepareConcurrency)
 		for _, item := range items {
-			if item.PreparedUploadCleanup != nil {
-				item.PreparedUploadCleanup()
-				item.PreparedUploadCleanup = nil
+			if prepareCtx.Err() != nil {
+				break
 			}
-			item.PreparedUploadPath = ""
+			item := item
+			group.Go(func() error {
+				if err := prepareCtx.Err(); err != nil {
+					return err
+				}
+				return prepare(prepareCtx, item)
+			})
 		}
-		g.Log().Warningf(ctx, "防扫图全量准备失败 mediaCount:%d err:%+v", len(items), err)
-		return err
+		err := group.Wait()
+		select {
+		case done <- err:
+		case <-prepareCtx.Done():
+			cleanupPreparedTelegramMedia(items)
+		}
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			err = prepareCtx.Err()
+		}
+		if err != nil {
+			cleanupPreparedTelegramMedia(items)
+			g.Log().Warningf(ctx, "防扫图全量准备失败 mediaCount:%d err:%+v", len(items), err)
+			return err
+		}
+	case <-prepareCtx.Done():
+		return prepareCtx.Err()
+	}
+	cleanupPreparedTelegramMedia(originals)
+	for i, item := range items {
+		*originals[i] = *item
 	}
 	g.Log().Infof(ctx, "防扫图全量准备完成 mediaCount:%d", len(items))
 	return nil
@@ -97,11 +130,15 @@ func fallbackTelegramAntiScanToOriginal(mediaSets ...[]*telegramMediaItem) {
 	cleanupPreparedTelegramMedia(mediaSets...)
 	for _, set := range mediaSets {
 		for _, item := range set {
-			if item == nil {
+			if item == nil || !item.AntiScanEnabled {
 				continue
 			}
 			item.AntiScanEnabled = false
 			item.ForceUpload = false
+			item.ProcessedAssetHash = ""
+			item.ProtectedHashKey = ""
+			item.ProtectedPHash = 0
+			item.ProtectedDHash = 0
 		}
 	}
 }
