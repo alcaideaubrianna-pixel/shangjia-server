@@ -171,7 +171,10 @@ END $$`,
 // connection; this fixture intentionally does not attempt multi-connection races.
 func accountRelationLocalDDL(t *testing.T, install string) []string {
 	t.Helper()
-	var ddl []string
+	ddl := []string{
+		`CREATE TEMP TABLE hg_youban_publish_account(id bigint,tenant_id bigint,account_type text,status int,deleted_at timestamp) ON COMMIT DROP`,
+		`CREATE TEMP TABLE hg_youban_publish_account_setting(account_id bigint,tenant_id bigint,collect_push_enabled int,deleted_at timestamp) ON COMMIT DROP`,
+	}
 	for _, table := range []string{"hg_youban_publish_collect_source", "hg_youban_publish_collect_channel", "hg_youban_publish_collect_account_channel"} {
 		pattern := `(?s)CREATE TABLE IF NOT EXISTS "` + regexp.QuoteMeta(table) + `" \(.*?\n\);`
 		statement := regexp.MustCompile(pattern).FindString(install)

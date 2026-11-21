@@ -93,6 +93,7 @@ type botProfileAccount struct {
 	AccountType           string
 	App                   string
 	SharedResourceEnabled bool
+	CollectPushEnabled    bool
 }
 
 type profileManageMessageHandler struct{}

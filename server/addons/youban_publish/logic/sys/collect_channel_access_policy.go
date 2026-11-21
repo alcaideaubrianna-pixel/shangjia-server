@@ -28,6 +28,7 @@ type collectChannelAccessPolicyInput struct {
 	BotCollectScope string
 	RelationExists  bool
 	Status          string
+	ApprovalStatus  string
 }
 
 type collectChannelAccessPolicyDecision struct {
@@ -46,7 +47,7 @@ func decideCollectChannelAccess(in collectChannelAccessPolicyInput) collectChann
 		}
 	}
 	return collectChannelAccessPolicyDecision{
-		Allowed:     botCollectChannelRelationEnabled(in.Status),
+		Allowed:     botCollectChannelRelationEnabled(in.Status) && !strings.EqualFold(strings.TrimSpace(in.ApprovalStatus), "rejected"),
 		RelationKey: key,
 	}
 }

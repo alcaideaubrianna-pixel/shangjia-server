@@ -1,4 +1,5 @@
 -- Interactive upgrades must remain short. Historical cleanup and backfills belong in upgrade.sql.
+ALTER TABLE `hg_youban_publish_account_setting` ADD COLUMN IF NOT EXISTS `collect_push_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '上架账号是否可使用采集推送';
 CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_dedupe_entry` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) NOT NULL DEFAULT '0', `account_id` bigint(20) NOT NULL DEFAULT '0',

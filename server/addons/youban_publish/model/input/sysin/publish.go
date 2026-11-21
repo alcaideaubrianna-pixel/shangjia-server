@@ -270,6 +270,7 @@ type AccountSettingSaveInp struct {
 	SharedResourceEnabled    int    `json:"sharedResourceEnabled" dc:"是否允许上架账号管理租户共享资料"`
 	TelegramBindingEnabled   int    `json:"telegramBindingEnabled" dc:"是否允许上架账号绑定并使用Telegram"`
 	GroupPushEnabled         int    `json:"groupPushEnabled" dc:"是否允许上架账号使用群聊推送"`
+	CollectPushEnabled       *int   `json:"collectPushEnabled" dc:"是否允许使用采集推送"`
 	PushEngine               string `json:"pushEngine" dc:"频道推送引擎：legacy/unified"`
 }
 
@@ -322,6 +323,9 @@ func (in *AccountSettingSaveInp) Filter(ctx context.Context) error {
 	if in.GroupPushEnabled != 0 && in.GroupPushEnabled != 1 {
 		return gerror.New("群聊推送开关不合法")
 	}
+	if in.CollectPushEnabled != nil && *in.CollectPushEnabled != 0 && *in.CollectPushEnabled != 1 {
+		return gerror.New("采集推送开关不合法")
+	}
 	return nil
 }
 
@@ -337,7 +341,7 @@ func (in *AccountSettingPatchInp) Filter(ctx context.Context) error {
 		return gerror.New("账号ID不能为空")
 	}
 	switch in.Field {
-	case "enableSuffix", "enableTitleMark", "profileDetailViewEnabled", "sharedResourceEnabled", "telegramBindingEnabled", "groupPushEnabled":
+	case "enableSuffix", "enableTitleMark", "profileDetailViewEnabled", "sharedResourceEnabled", "telegramBindingEnabled", "groupPushEnabled", "collectPushEnabled":
 		if in.Value != "0" && in.Value != "1" {
 			return gerror.New("开关值不合法")
 		}
@@ -378,6 +382,7 @@ type AccountSettingModel struct {
 	SharedResourceEnabled    int         `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled   int         `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
 	GroupPushEnabled         int         `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	CollectPushEnabled       int         `json:"collectPushEnabled" dc:"是否允许使用采集推送"`
 	PushEngine               string      `json:"pushEngine" dc:"频道推送引擎"`
 	DailyReportEnabled       int         `json:"dailyReportEnabled" dc:"是否接收每日报告"`
 	ChannelAlertEnabled      int         `json:"channelAlertEnabled" dc:"是否接收频道异常通知"`
@@ -396,6 +401,7 @@ type AccountCapabilityModel struct {
 	SharedResourceEnabled    int    `json:"sharedResourceEnabled" dc:"是否允许管理租户共享资料"`
 	TelegramBindingEnabled   int    `json:"telegramBindingEnabled" dc:"是否允许绑定并使用Telegram"`
 	GroupPushEnabled         int    `json:"groupPushEnabled" dc:"是否允许使用群聊推送"`
+	CollectPushEnabled       int    `json:"collectPushEnabled" dc:"是否允许使用采集推送"`
 }
 
 type CurrentAccountModel struct {
@@ -412,6 +418,7 @@ type CurrentAccountModel struct {
 	UpdatedAt                *gtime.Time           `json:"updatedAt" dc:"更新时间"`
 	Vip                      *TenantVipStatusModel `json:"vip" dc:"会员状态"`
 	GroupPushEnabled         int                   `json:"groupPushEnabled" dc:"是否允许群聊推送"`
+	CollectPushEnabled       int                   `json:"collectPushEnabled" dc:"是否允许使用采集推送"`
 	CycleFreeIntervalDays    int                   `json:"cycleFreeIntervalDays" dc:"免费频道循环间隔天数"`
 	CycleFreeInactiveDays    int                   `json:"cycleFreeInactiveDays" dc:"免费频道循环自动暂停天数"`
 }

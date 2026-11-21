@@ -352,7 +352,7 @@ func (s *sSysBot) DeliverUploaderReviewNotice(ctx context.Context, in *pi.Upload
 		message := "注册申请未通过，请联系管理员。"
 		var markup models.ReplyMarkup = &models.ReplyKeyboardRemove{RemoveKeyboard: true}
 		if review.Status == uploaderApproved {
-			_, accountErr := scopedUploaderAccount(ctx, review.TenantId, review.OwnerAccountId, review.AccountId)
+			account, accountErr := scopedUploaderAccount(ctx, review.TenantId, review.OwnerAccountId, review.AccountId)
 			if accountErr != nil && in.Status == 1 {
 				return accountErr
 			}
@@ -361,7 +361,7 @@ func (s *sSysBot) DeliverUploaderReviewNotice(ctx context.Context, in *pi.Upload
 				if in.Kind == pi.UploaderAccountStatusNotice {
 					message = "上架账户已启用。请选择底部功能。"
 				}
-				markup = collectorReplyKeyboard(false)
+				markup = uploaderAccountKeyboard(account)
 			} else {
 				message = "上架账户已停用，请联系管理员。"
 			}
@@ -391,6 +391,7 @@ func scopedUploaderAccount(ctx context.Context, tenantID, ownerID, accountID int
 		TenantId: capability.TenantId, AccountId: capability.AccountId,
 		AccountType: capability.AccountType, App: "api",
 		SharedResourceEnabled: capability.SharedResourceEnabled == 1,
+		CollectPushEnabled:    capability.CollectPushEnabled == 1,
 	}, nil
 }
 

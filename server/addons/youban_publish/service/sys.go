@@ -365,6 +365,11 @@ type ISysPublish interface {
 	CollectConfig(ctx context.Context) (res *sysin.CollectConfigModel, err error)
 	CollectConfigSave(ctx context.Context, in *sysin.CollectConfigSaveInp) (err error)
 	CollectStats(ctx context.Context) (res *sysin.CollectStatsModel, err error)
+	CollectManageChannels(ctx context.Context, in *sysin.CollectManageChannelListInp) ([]*sysin.CollectManageChannelModel, int, error)
+	CollectManageChannelAction(ctx context.Context, in *sysin.CollectManageChannelActionInp) error
+	BotCollectManageChannels(ctx context.Context, tenantID, actorID int64, in *sysin.CollectManageChannelListInp) ([]*sysin.CollectManageChannelModel, int, error)
+	BotCollectManageLegacySuffix(ctx context.Context, tenantID, actorID, ownerID, ruleID, botID int64, channelID, suffix string) error
+	BotCollectManageChannelAction(ctx context.Context, tenantID, actorID int64, in *sysin.CollectManageChannelActionInp) error
 	CollectSourceList(ctx context.Context, in *sysin.CollectSourceListInp) (list []*sysin.CollectSourceModel, totalCount int, err error)
 	IntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp) (list []*sysin.IntroFeeChannelRuleItem, totalCount int, err error)
 	IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error)
@@ -395,7 +400,7 @@ type ISysPublish interface {
 	BotCollectChannelView(ctx context.Context, relationId, tenantId, operatorAccountId int64) (res *sysin.CollectChannelApprovalModel, err error)
 	BotCollectChannelApproval(ctx context.Context, relationId, tenantId, operatorAccountId int64, approved bool) (res *sysin.CollectChannelApprovalModel, err error)
 	BotChannelMembershipChanged(ctx context.Context, botId int64, chatId, status, role string, updateId int64) error
-	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64) (int64, error)
+	BotIntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp, tenantId, accountId int64, actorIDs ...int64) (int64, error)
 	BotIntroFeeChannelRuleList(ctx context.Context, in *sysin.IntroFeeChannelRuleListInp, tenantId, accountId int64) (list []*sysin.IntroFeeChannelRuleItem, total int, err error)
 	BotIntroFeeChannelRuleDelete(ctx context.Context, id, ruleId, tenantId, accountId int64) error
 	BotIntroFeeChannelPurge(ctx context.Context, in *sysin.IntroFeeChannelPurgeInp, tenantId, accountId int64) (*sysin.IntroFeeChannelPurgeModel, error)

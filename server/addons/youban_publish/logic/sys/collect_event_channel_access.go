@@ -56,7 +56,7 @@ func resolveCollectEventChannelAccess(ctx context.Context, event gdb.Record, acc
 	relationCols := pdao.YoubanPublishCollectAccountChannel.Columns()
 	err = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
 		Fields(relationCols.Id, relationCols.ChannelId, relationCols.SourceId,
-			relationCols.Status).
+			relationCols.Status, relationCols.ApprovalStatus).
 		Where(relationCols.TenantId, tenantID).Where(relationCols.AccountId, accountID).
 		Where(relationCols.SourceId, sourceID).WhereIn(relationCols.ChannelId, ids).
 		WhereNull(relationCols.DeletedAt).
@@ -88,6 +88,7 @@ func resolveCollectEventChannelAccess(ctx context.Context, event gdb.Record, acc
 		CanonicalChat:  event["source_chat_id"].String(),
 		RelationExists: result.Relation.Id > 0,
 		Status:         result.Relation.Status,
+		ApprovalStatus: result.Relation.ApprovalStatus,
 	}).Allowed
 	return result, nil
 }

@@ -76,7 +76,7 @@ func TestProfileDetailReadLocalPostgres(t *testing.T) {
 	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		for _, q := range []string{
 			`CREATE TEMP TABLE hg_youban_publish_account(id bigint PRIMARY KEY,tenant_id bigint,account_type text,status int,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_account_setting(account_id bigint,tenant_id bigint,profile_detail_view_enabled int,shared_resource_enabled int,telegram_binding_enabled int,group_push_enabled int,deleted_at timestamp) ON COMMIT DROP`,
+			`CREATE TEMP TABLE hg_youban_publish_account_setting(account_id bigint,tenant_id bigint,profile_detail_view_enabled int,shared_resource_enabled int,telegram_binding_enabled int,group_push_enabled int,deleted_at timestamp,collect_push_enabled int DEFAULT 0) ON COMMIT DROP`,
 			`CREATE TEMP TABLE hg_youban_publish_profile_state(profile_id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,deleted_at timestamp) ON COMMIT DROP`,
 			`INSERT INTO hg_youban_publish_account VALUES(8,7,'uploader',1,NULL),(9,7,'uploader',1,NULL),(10,10,'uploader',1,NULL)`,
 			`INSERT INTO hg_youban_publish_account_setting VALUES(8,7,1,0,0,0,NULL)`,

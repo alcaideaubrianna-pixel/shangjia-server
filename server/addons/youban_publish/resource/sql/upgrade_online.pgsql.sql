@@ -301,6 +301,7 @@ ALTER TABLE hg_youban_publish_tg_job ADD COLUMN IF NOT EXISTS cycle_failure_coun
 ALTER TABLE hg_youban_publish_tg_job ADD COLUMN IF NOT EXISTS recovery_of_job_id bigint DEFAULT NULL;
 
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "profile_detail_view_enabled" smallint NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "collect_push_enabled" smallint NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_account_setting" ADD COLUMN IF NOT EXISTS "push_engine" varchar(16) NOT NULL DEFAULT 'legacy';
 CREATE INDEX IF NOT EXISTS "idx_ybp_account_setting_push_engine" ON "hg_youban_publish_account_setting" ("tenant_id", "account_id", "push_engine") WHERE "deleted_at" IS NULL;
 ALTER TABLE "hg_youban_publish_material_import_task" ADD COLUMN IF NOT EXISTS "channel_id_json" text;

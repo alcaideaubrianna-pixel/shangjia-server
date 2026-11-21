@@ -37,6 +37,7 @@ func (s *sSysPublish) CurrentAccount(ctx context.Context) (*sysin.CurrentAccount
 		UpdatedAt:                account.UpdatedAt,
 		Vip:                      vip,
 		GroupPushEnabled:         capability.GroupPushEnabled,
+		CollectPushEnabled:       capability.CollectPushEnabled,
 		ProfileDetailViewEnabled: capability.ProfileDetailViewEnabled,
 		CycleFreeIntervalDays:    maxConfigInt(ctx, "youbanPublish.cycle.freeIntervalDays", 15),
 		CycleFreeInactiveDays:    maxConfigInt(ctx, "youbanPublish.cycle.freeInactiveDays", 7),

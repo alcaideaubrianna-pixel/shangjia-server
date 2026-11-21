@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 	"github.com/gogf/gf/v2/os/gtime"
-	_ "modernc.org/sqlite"
 
 	"hotgo/utility/dbtime"
 )

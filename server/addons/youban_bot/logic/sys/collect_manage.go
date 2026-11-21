@@ -207,7 +207,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			text := fmt.Sprintf("确认禁用频道采集？\n频道：%s\n频道 ID：%s%s\n\n确认后不再采集该频道的新消息。已有资料、已推送消息和后缀配置保留。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink))
 			return true, s.sendCollectManageMarkup(ctx, botId, chatId, text, [][]models.InlineKeyboardButton{{{Text: "确认禁用", CallbackData: fmt.Sprintf("cm:channelstatusconfirm:%d:%d:%s:2", ruleID, rowID, item.ChannelId)}, {Text: "取消", CallbackData: "cm:channelactioncancel"}}})
 		}
-		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId)
+		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId, account.AccountId)
 		if err != nil {
 			return true, err
 		}
@@ -275,6 +275,9 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.startCollectRuleEdit(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "editconfirm":
+		if account.AccountType != "admin" {
+			return true, nil
+		}
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
 		if session == nil || session.Scene != "collect_rule_edit" {
 			return true, nil
@@ -289,8 +292,11 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		session.Step = "confirming"
 		return true, s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, payload.Draft)
 	case "editcancel":
+		if account.AccountType != "admin" {
+			return true, nil
+		}
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
-		if session == nil {
+		if session == nil || session.Scene != "collect_rule_edit" {
 			return true, nil
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
@@ -389,9 +395,11 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 		if locked.Status != profileSessionStatusActive || locked.Step != "confirming" || locked.PayloadJson != session.PayloadJson {
 			return gerror.New("确认已失效，请使用最新的后缀预览重新操作")
 		}
-		if _, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{
-			Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: payload.ChannelId, Suffix: strings.TrimSpace(payload.Draft), Status: 1,
-		}, account.TenantId, ownerAccountID); err != nil {
+		if locked.App != account.App || locked.TenantId != account.TenantId || locked.AccountId != account.AccountId {
+			return gerror.New("当前绑定账户已变更，请重新设置频道后缀")
+		}
+		if err := publishService.SysPublish().BotCollectManageLegacySuffix(ctx, account.TenantId, account.AccountId,
+			ownerAccountID, payload.RuleId, payload.BotId, payload.ChannelId, payload.Draft); err != nil {
 			return err
 		}
 		return s.completeProfileSession(ctx, session.Id)
@@ -399,7 +407,7 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 	if err != nil {
 		return err
 	}
-	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n采集状态：已开启\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
+	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
 }
 
 func (s *sSysBot) showCollectSourceList(ctx context.Context, botId int64, chatId string, account *botProfileAccount, page int) error {

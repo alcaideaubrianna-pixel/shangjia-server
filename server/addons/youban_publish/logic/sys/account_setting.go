@@ -16,6 +16,8 @@ import (
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
 
+const collectPushEnabledColumn = "collect_push_enabled"
+
 func (s *sSysPublish) AdminAccountSettingView(ctx context.Context, in *sysin.AccountSettingViewInp) (*sysin.AccountSettingModel, error) {
 	admin, err := s.currentAdminAccount(ctx)
 	if err != nil {
@@ -56,6 +58,7 @@ func (s *sSysPublish) MyAccountSettingSave(ctx context.Context, in *sysin.Accoun
 	in.SharedResourceEnabled = current.SharedResourceEnabled
 	in.TelegramBindingEnabled = current.TelegramBindingEnabled
 	in.GroupPushEnabled = current.GroupPushEnabled
+	in.CollectPushEnabled = nil
 	if err = in.Filter(ctx); err != nil {
 		return nil, err
 	}
@@ -133,6 +136,9 @@ func (s *sSysPublish) AdminAccountSettingSave(ctx context.Context, in *sysin.Acc
 		return nil, gerror.Wrap(err, "读取上架账号失败")
 	}
 	if target.AccountType != sysin.PublishAccountTypeUploader {
+		if in.CollectPushEnabled != nil {
+			return nil, gerror.New("采集推送权限仅适用于上架账号")
+		}
 		in.ProfileDetailViewEnabled = 0
 		in.SharedResourceEnabled = 0
 		in.TelegramBindingEnabled = 0
@@ -233,6 +239,13 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 		"updated_by":                  operatorId,
 		"updated_at":                  now,
 	}
+	// Omitted values must stay out of the write to preserve concurrent permission changes.
+	if in.CollectPushEnabled != nil {
+		if _, ok := fields[collectPushEnabledColumn]; !ok {
+			return gerror.New("账号设置数据库尚未升级，请先完成数据库迁移")
+		}
+		data[collectPushEnabledColumn] = *in.CollectPushEnabled
+	}
 	count, err := g.DB().Model(publishAccountSettingTable).Safe().Ctx(ctx).
 		Where("tenant_id", tenantId).
 		Where("account_id", in.AccountId).
@@ -264,7 +277,8 @@ func (s *sSysPublish) saveAccountSetting(ctx context.Context, tenantId int64, op
 	if saved.ProfileDetailViewEnabled != in.ProfileDetailViewEnabled ||
 		saved.SharedResourceEnabled != in.SharedResourceEnabled ||
 		saved.TelegramBindingEnabled != in.TelegramBindingEnabled ||
-		saved.GroupPushEnabled != in.GroupPushEnabled {
+		saved.GroupPushEnabled != in.GroupPushEnabled ||
+		(in.CollectPushEnabled != nil && saved.CollectPushEnabled != *in.CollectPushEnabled) {
 		return gerror.New("账号权限保存结果不一致，请刷新后重试")
 	}
 	return nil
@@ -321,6 +335,7 @@ func fillAccountSettingModel(model *sysin.AccountSettingModel, row gdb.Record) {
 	model.SharedResourceEnabled = row["shared_resource_enabled"].Int()
 	model.TelegramBindingEnabled = row["telegram_binding_enabled"].Int()
 	model.GroupPushEnabled = row["group_push_enabled"].Int()
+	model.CollectPushEnabled = row[collectPushEnabledColumn].Int()
 	model.PushEngine = strings.TrimSpace(row["push_engine"].String())
 	if model.PushEngine == "" {
 		model.PushEngine = "legacy"
@@ -373,6 +388,9 @@ func (s *sSysPublish) PatchAccountSetting(ctx context.Context, in *sysin.Account
 		if target.IsEmpty() || (in.AccountId != admin.Id && target[cols.ParentId].Int64() != admin.Id) {
 			return gerror.New("账号不存在或无权操作")
 		}
+		if in.Field == "collectPushEnabled" && target[cols.AccountType].String() != sysin.PublishAccountTypeUploader {
+			return gerror.New("采集推送权限仅适用于上架账号")
+		}
 		current, err := s.accountSetting(ctx, admin.TenantId, in.AccountId)
 		if err != nil {
 			return err
@@ -414,6 +432,9 @@ func applyAccountSettingPatch(save *sysin.AccountSettingSaveInp, in *sysin.Accou
 		save.TelegramBindingEnabled = gconv.Int(in.Value)
 	case "groupPushEnabled":
 		save.GroupPushEnabled = gconv.Int(in.Value)
+	case "collectPushEnabled":
+		enabled := gconv.Int(in.Value)
+		save.CollectPushEnabled = &enabled
 	case "enableSuffix":
 		if in.Value == "1" {
 			save.EnableSuffix = 1
