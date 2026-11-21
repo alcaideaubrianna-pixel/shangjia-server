@@ -55,6 +55,8 @@ func TestCollectManageChannelPermissionsPostgres(t *testing.T) {
 			`INSERT INTO hg_youban_publish_account_setting(account_id,tenant_id,collect_push_enabled) VALUES (2,78,1),(4,79,1),(5,78,1)`,
 			`INSERT INTO hg_youban_publish_collect_rule VALUES (10,78,1,'A',NULL),(11,78,1,'B',NULL)`,
 			`INSERT INTO hg_youban_publish_collect_source VALUES (20,78,1,40,'','',NULL,NULL)`,
+			`INSERT INTO hg_youban_publish_collect_rule_item VALUES (1,10,'intro_fee_suffix','default A','',1),(2,11,'intro_fee_suffix','default B','',1)`,
+			`INSERT INTO hg_youban_publish_intro_fee_channel_rule(tenant_id,account_id,rule_id,bot_id,channel_id,suffix) VALUES (78,0,10,40,'1234567890','global'),(78,1,10,0,'-1001234567890',''),(79,1,11,40,'1234567890','other tenant')`,
 			`INSERT INTO hg_youban_publish_collect_source_rule VALUES (20,78,10,1),(20,78,11,1)`,
 			`INSERT INTO hg_youban_publish_collect_channel VALUES (30,78,'-1001234567890','test channel','','',NULL)`,
 			`INSERT INTO hg_youban_publish_collect_account_channel VALUES (50,78,1,30,20,'enabled',1,'pending',NULL,NULL,NULL,NULL)`,
@@ -70,6 +72,16 @@ func TestCollectManageChannelPermissionsPostgres(t *testing.T) {
 		rows, total, err := s.BotCollectManageChannels(ctx, 78, 2, &sysin.CollectManageChannelListInp{Keyword: "test"})
 		if err != nil || len(rows) != 2 || total != 2 || rows[0].RuleId != 10 || rows[1].RuleId != 11 {
 			t.Fatalf("list rows=%+v total=%d err=%v", rows, total, err)
+		}
+		if rows[0].Suffix != "" || rows[1].Suffix != "default B" {
+			t.Fatalf("suffix fallback or explicit empty override changed: %q / %q", rows[0].Suffix, rows[1].Suffix)
+		}
+		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_intro_fee_channel_rule(tenant_id,account_id,rule_id,bot_id,channel_id,suffix) VALUES (78,1,0,40,'1234567890','bot fallback')`); err != nil {
+			return err
+		}
+		rows, _, err = s.BotCollectManageChannels(ctx, 78, 2, nil)
+		if err != nil || len(rows) != 2 || rows[0].Suffix != "" || rows[1].Suffix != "bot fallback" {
+			t.Fatalf("unexpected BOT fallback: rows=%+v err=%v", rows, err)
 		}
 		approve := &sysin.CollectManageChannelActionInp{RelationId: 50, Action: "approve"}
 		for _, actor := range []int64{3, 4, 5} {

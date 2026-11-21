@@ -92,26 +92,19 @@ func (s *sSysPublish) BotCollectManageChannels(ctx context.Context, tenantID, ac
 	if err != nil {
 		return nil, 0, err
 	}
+	suffixes, err := s.collectManageChannelSuffixes(ctx, tenantID, rows, ruleItems)
+	if err != nil {
+		return nil, 0, err
+	}
 	list := make([]*sysin.CollectManageChannelModel, 0, len(rows))
-	for _, row := range rows {
+	for index, row := range rows {
 		item := &sysin.CollectManageChannelModel{
 			RelationId: row["relation_id"].Int64(), RuleId: row["rule_id"].Int64(), RuleName: row["rule_name"].String(),
 			ChannelId: row["telegram_chat_id"].String(), ChannelTitle: row["title"].String(),
 			ChannelLink: collectChannelPublicLink(row["username"].String(), row["invite_link"].String()),
 			Status:      row["status"].String(), ApprovalStatus: row["approval_status"].String(),
 		}
-		if item.RuleId > 0 {
-			var fallback string
-			if items := ruleItems[item.RuleId]; items != nil {
-				fallback = items.IntroFeeSuffix
-			}
-			item.Suffix, _, err = s.resolveIntroFeeChannelSuffix(ctx, gdb.Record{
-				"tenant_id": g.NewVar(tenantID), "account_id": row["account_id"], "bot_id": row["bot_id"], "source_chat_id": row["telegram_chat_id"],
-			}, gdb.Record{"id": row["rule_id"], "intro_fee_suffix": g.NewVar(fallback)})
-			if err != nil {
-				return nil, 0, err
-			}
-		}
+		item.Suffix = suffixes[index]
 		list = append(list, item)
 	}
 	return list, total, nil
