@@ -55,8 +55,7 @@ jobs:
             echo "::error::TENCENT_IMAGE must be registry/namespace/repository without a scheme, tag or digest"
             exit 1
           fi
-          repository="${GITHUB_REPOSITORY,,}"
-          echo "server=ghcr.io/${repository}" >> "$GITHUB_OUTPUT"
+          echo "server=ghcr.io/mjiadfwaff-bot/xiaohuiji-server" >> "$GITHUB_OUTPUT"
           echo "tencent_registry=$tencent_registry" >> "$GITHUB_OUTPUT"
           echo "tencent=$TENCENT_IMAGE" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
