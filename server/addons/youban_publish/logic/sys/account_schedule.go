@@ -523,8 +523,21 @@ func (s *sSysPublish) createAccountProfileCycle(ctx context.Context, scope publi
 			return nil
 		}
 		key := fmt.Sprintf("account:%d:%d:%d:plan:%d", scope.AccountID, row.ProfileId, row.JobId, row.DispatchCount+1)
-		id, err := tx.Model(publishProfileCycleRunTable).Data(g.Map{"tenant_id": scope.TenantID, "account_id": scope.AccountID, "profile_id": row.ProfileId, "run_key": key, "status": "pending", "due_at": row.NextCycleAt}).InsertAndGetId()
+		insertedID, err := tx.GetValue("WITH inserted AS (INSERT INTO "+publishProfileCycleRunTable+
+			" (tenant_id,account_id,profile_id,run_key,status,due_at) VALUES (?,?,?,?, 'pending',?)"+
+			" ON CONFLICT (run_key) DO NOTHING RETURNING id) SELECT COALESCE((SELECT id FROM inserted),0)",
+			scope.TenantID, scope.AccountID, row.ProfileId, key, row.NextCycleAt)
 		if err != nil {
+			return err
+		}
+		id := insertedID.Int64()
+		if id == 0 {
+			// An existing run already owns this generation. Defer the stale mapping without creating another send.
+			_, err = tx.Model(publishChannelProfileTable).
+				Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).Where("profile_id", row.ProfileId).
+				Where("last_job_id", row.JobId).Where("status", "active").
+				Where("cycle_generation", row.DispatchCount).Where("next_cycle_at", row.NextCycleAt).
+				Data(g.Map{"next_cycle_at": gtime.Now().Add(profileCycleRetryDelay)}).Update()
 			return err
 		}
 		for _, channel := range channels {
