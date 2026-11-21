@@ -1,259 +1,134 @@
-# 线上调试与 Agent 交接
+# 腾讯云生产排障手册
 
-最后核对：2026-10-20。连接和应用清单是定位入口，不是实时健康证明；开始工作时重新读取实际配置。本文不保存密码、Bot Token、登录 Token 或云密钥。
+生产环境为腾讯云新加坡 `ap-singapore` 的 `Xiaohuiji-Cluster`（`cls-7wx2ohw2`），业务命名空间为 `xiaohuiji`。发布、切流及回滚见 [TKE 红蓝发布手册](../deploy/TKE.md)。
 
-## 1. 接手顺序
+| 入口 | 用途 |
+|---|---|
+| `https://api.xiaohuiji.cc/readyz` | 线上入口及应用依赖探测 |
+| `pgsql.tke.xiaohuiji.cc`、`redis.tke.xiaohuiji.cc` | 腾讯云私有 DNS 的生产依赖记录；端口、TLS、逻辑库从已授权的在用角色配置核对 |
+| `ubuntu@43.134.114.149` | PostgreSQL / Pigsty 主机，业务库 `railway` |
+| `ubuntu@43.160.217.230` | Redis 主机、指标采集及转发 |
+| `43.160.214.94` | 监控主机，Grafana、VictoriaMetrics、VictoriaLogs、VictoriaTraces |
+| [应用性能监控](https://43.160.214.94.sslip.io/d/xiaohuiji-sg-http-apm) · [PostgreSQL 慢 SQL](https://43.160.214.94.sslip.io/d/xiaohuiji-pgsql-query) · [Grafana Explore](https://43.160.214.94.sslip.io/explore) | HTTP 耗时和状态码、慢 SQL 明细、按 Trace ID 查链路 |
 
-1. 完整阅读仓库根目录 `AGENTS.md`，查看 `git status --short`、当前分支及 `git worktree list`。现有未提交修改不等于本任务修改，禁止整体暂存或清理。
-2. 当前生产部署以阿里云 SAE、RDS、Redis 和 OSS 为准。不要根据历史分支名或旧平台文档推断当前运行环境；构建、部署状态分别记录。
-3. 先确定租户、账号、频道、资料、消息、job/event ID，获取有界的真实样本。区分已证实原因、推测、修复和待验收项。
-4. DB 优先 DBX MCP，远程系统使用 SSH server 2 MCP。不要因为终端缺少 curl/wget 就判断服务故障。
+从 5–15 分钟的故障窗口开始，记录北京时间、环境、角色、Pod、实际镜像摘要、请求或任务 ID。默认走只读路径，先取证再变更。不要输出 Secret、整份 ENV、连接串、签名 URL、客户数据或带参数的 SQL。DBX 连接只有在核验它指向当前腾讯云实例后才可使用。
 
-## 2. 已核对的连接入口
+## 1. PostgreSQL
 
-| 入口 | 名称/地址 | 用途 |
-|---|---|---|
-| DBX PostgreSQL | `PostgreSQL_Xiaohuiji` | 生产业务库；数据库名和连接参数以当前 RDS 配置为准 |
-| DBX connection ID | `436a8ca1-a13c-4a26-aa6f-08633096b8a4` | 当前配置的连接 ID，重建后可能变化 |
-| PostgreSQL 内网地址 | `10.3.0.10:5432` | 以 DBX 当前配置为准，不要求本机直接可达 |
-| SSH server 2 | `b-xiaohuiji-sg`，`ubuntu@43.159.54.73` | PostgreSQL 主机，已验证本机 psql 可用 |
-| SSH server 2 | `aliyun-sg-Redis`，`root@47.79.227.11` | Redis 节点；逻辑 DB、端口及当前实际连接从阿里云配置和应用配置确认 |
-| SSH server 2 | `b-xiaohuiji-Redis-sg`，`ubuntu@43.153.199.31` | 另一个已配置 Redis 节点；不能据名称认定仍承载生产 |
-| API | `https://api.xiaohuiji.cc` | 生产 Web API |
-| 本地后端 | `/Users/ley/Desktop/CodeProject/youban/youban-server/server` | Go module hotgo |
-| 本地前端 | `/Users/ley/Desktop/CodeProject/youban/tdesign-starter/vue_admin_demo` | 用户指定的前端目录，进入前重新核对工作区 |
-
-连接发现：`mcp__dbx__dbx_list_connections`、`mcp__mcp_server_2__list_servers`。工具名以当前会话提供的 schema 为准，未注入时先通过可用工具发现机制查找，不能声称已经执行。
-
-DBX 示例（工具参数，不是 shell 命令）：
-
-```json
-{"connection_name":"PostgreSQL_Xiaohuiji","sql":"SELECT current_database(), now();","max_rows":10}
-```
-
-SSH 示例（仅用于节点级检查；云资源操作优先使用阿里云 CLI）：
-
-```json
-{"connectionName":"b-xiaohuiji-sg","cmdString":"sudo -u postgres psql -d <production_database> -X -P pager=off -c 'SELECT now();'","timeout":20000}
-```
-
-优先使用已配置的连接凭据。应用运行参数从 SAE 应用配置、RDS、Redis 和 OSS 的阿里云配置读取；禁止整份 ENV、docker inspect 环境或带凭据的连接串输出到日志、对话、文档。
-
-## 3. 阿里云 CLI 与本地代理
-
-本地执行阿里云 CLI 前必须通过系统代理访问云 API。代理地址以本机实际配置为准，常见配置如下：
+授权 SSH 登录数据库主机，在数据库主机上使用本地账号。Pod 排障按内网 DNS 和应用所在网络路径验证，避免把主机本地可用当作 Pod 到库也可用。
 
 ```bash
-export HTTP_PROXY=http://127.0.0.1:6153
-export HTTPS_PROXY=http://127.0.0.1:6153
-export ALL_PROXY=http://127.0.0.1:6153
-aliyun sts GetCallerIdentity
+sudo -u postgres psql -X -P pager=off -v ON_ERROR_STOP=1 -d railway
 ```
-
-只在当前 shell 会话设置代理，不把代理地址、AccessKey、Secret 或临时凭证写入仓库。执行资源查询时优先使用只读阿里云 CLI 命令；变更前核对地域（当前生产为 `ap-southeast-1`）、实例 ID、应用角色和目标环境。
-
-## 4. DB、磁盘、日志排查
-
-先查连接与锁等待，再查慢查询和磁盘；不能只凭 API 503 判定 Redis 或 DB 已挂。
 
 ```sql
-SELECT pid, state, wait_event_type, wait_event,
-       now()-query_start AS elapsed, left(query,400) AS query
-FROM pg_stat_activity
-WHERE datname=current_database() AND pid<>pg_backend_pid()
-ORDER BY query_start LIMIT 20;
-
-SELECT pid, pg_blocking_pids(pid) AS blockers
-FROM pg_stat_activity
-WHERE cardinality(pg_blocking_pids(pid))>0 LIMIT 20;
-
-SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total
-FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 20;
+SET statement_timeout = '5s';
+SELECT now(), current_database(), pg_is_in_recovery(), current_setting('max_connections');
+SELECT state, wait_event_type, wait_event, count(*)
+FROM pg_stat_activity WHERE backend_type = 'client backend' GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 20;
+WITH blocked AS (
+  SELECT unnest(pg_blocking_pids(pid)) AS blocker
+  FROM pg_stat_activity WHERE wait_event_type = 'Lock'
+)
+SELECT a.pid, a.application_name, a.state, a.wait_event,
+       clock_timestamp() - a.xact_start AS transaction_age, count(*) AS blocked_sessions
+FROM blocked b JOIN pg_stat_activity a ON a.pid = b.blocker
+GROUP BY a.pid, a.application_name, a.state, a.wait_event, a.xact_start
+ORDER BY blocked_sessions DESC LIMIT 15;
+SELECT mode, relation::regclass, count(*)
+FROM pg_locks
+WHERE NOT granted AND relation IS NOT NULL AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 15;
+SELECT datname, numbackends, deadlocks, temp_files, stats_reset
+FROM pg_stat_database WHERE datname = current_database();
 ```
 
-查询文本可能含业务数据，分享结果时只保留排查必要字段并脱敏。大表先查看字段和索引，不默认执行全表 COUNT 或 EXPLAIN ANALYZE。EXPLAIN ANALYZE 会实际执行查询，必须限定范围与执行时间。
+- 同时查 `df -h /pg/data`、当前 PostgreSQL 日志和 Grafana 慢日志。先 read-only `EXPLAIN`，生产大表只有在掌握代价和执行窗口时才用 `EXPLAIN ANALYZE`。用查询指纹、调用次数和统计重置时间区分累计指标与最近窗口。
+- `pg_up=1` 仅说明探针可读。大量连接配合 `wait_event_type='Lock'` 时，先找锁链最上游，再定位待授予的强锁。禁止按 PID 批量杀会话或直接重启数据库。
+- 已发生过 `pg_dump` 持有读锁、排队的独占锁阻挡后续查询的事故。2026-11-21 取消在线全备后，锁等待由 318 降到 0。当前 COS 目标桶为 `xiaohuiji-db-back-1512547869`。可以通过以下命令确认任务状态。该逻辑全备定时器已停用，首份完整 COS 备份尚未验收。恢复自动备份前应验证独立备份路径及恢复流程，避免直接重启这份定时任务。
 
-本次 DBX 显式 PostgreSQL BEGIN/COMMIT 被策略拒绝（SQL_BLOCKED）。需要原子迁移时使用已经授权的 SSH 本机 psql 事务，并设置 lock_timeout / statement_timeout。跨 DBX 调用不能假设 SET 会保留；需要状态时按当前工具支持使用固定 session，或 SSH 在同一 psql 会话完成。
+```bash
+systemctl list-timers --all xiaohuiji-pg-cos-backup.timer
+sudo journalctl -u xiaohuiji-pg-cos-backup.service --since '1 hour ago' -n 100 --no-pager
+```
 
-DB 主机检查 `df -h`；已知 PostgreSQL CSV 日志目录 `/pg/log/postgres/`，本次证据文件为 `postgresql-Tue.csv`。按实际日期及日志配置核对，不要硬编码周二文件为“当前日志”。CSV 慢 SQL 可能含多行和长参数，用 CSV 解析器读取，避免 grep 截断后误判 SQL。
+PostgreSQL 官方参考见 [活动与统计视图](https://www.postgresql.org/docs/18/monitoring-stats.html)。
 
-历史故障涉及数据库磁盘、日志大表、自建 Bot API 缓存。先核对各路径/表大小和保留需求；不得把消息审计、Attempt、采集事件和普通运行日志当成同一类直接清空。
+## 2. Redis 和任务队列
 
-## 5. SAE 角色与部署约束
+在 Redis 主机先确认本地监听与实际服务。使用已配置的 ACL 授权方式。以下命令在该实例的本地 `127.0.0.1:6379` 执行。若需密码，用终端交互的 `--askpass`，不将密码写进参数或 shell 历史。
 
-区域 `ap-southeast-1`；以下 ID 来自现有 `deploy/sae-deploy-all.sh`。
+```bash
+redis-cli -h 127.0.0.1 -p 6379 --askpass PING
+redis-cli -h 127.0.0.1 -p 6379 --askpass INFO clients memory stats persistence
+redis-cli -h 127.0.0.1 -p 6379 --askpass SLOWLOG LEN
+sudo journalctl -u redis-xiaohuiji-1-6379.service -u xiaohuiji-redis-forward.service \
+  --since '15 minutes ago' -n 100 --no-pager
+```
 
-| 角色 | AppId | 主要排查范围 |
-|---|---|---|
-| web | b4565e3c-6d08-4297-bf8b-037884d54ee4 | HTTP、鉴权、Bot 入口；具体消费者归属查当前启动配置 |
-| background | d12e3d86-e368-48ae-bac1-bd41b3a08ef2 | 后台任务 |
-| collector | 0deb4862-2af5-4c0f-9e82-ffa67364843e | 采集处理 |
-| media | a34c2ae5-6e59-428b-8aa5-1277cbecc9ae | 下载、处理、媒体缓存 |
-| publish | 2fb5d3db-0975-4dea-b086-805d255131fa | Telegram 发布 |
-| scheduler | 596e5f62-0715-499e-ba71-46f00c9869d3 | 调度、恢复 |
-| account | f8d4a7a9-d30f-46a5-89ac-dc57eb48fb4f | Telegram 协议号任务，严格单实例 |
+- 分别验证 `redis_up`、Pod 内 DNS/TCP、应用命令超时。客户端 `context deadline exceeded` 不能直接归因于 Redis 宕机。比较连接池、转发层、应用上下文耗时与 Redis 实例侧的阻塞客户端、连接拒绝、淘汰、内存及服务端慢命令。累计计数看故障窗口的增量。
+- Asynq 查实际逻辑 DB、真实分片名和 Worker 监听配置，再核对 `pending/active/scheduled/retry/archived`、最老任务年龄及消费速率。发布分片示例为 `youban_publish_tg_urgent_<shard>` 和 `youban_publish_tg_<shard>`。沿 `tenantId/channelId/jobId/attemptId` 对照数据库持久状态和 CLS。
+- `SLOWLOG GET` 可能含命令参数，仅限有权限的受控终端和小样本。禁止用 `KEYS *`、`MONITOR`、清库或批量重试定位问题。未知发送结果应先核对 Telegram 回执和任务状态。 [Redis INFO](https://redis.io/docs/latest/commands/info/)
 
-- Account 不能在本地再启动一个生产消费者；切换时先确认旧实例停止，再启动新实例。其他角色本地连接生产也会消费真实任务，必须有任务范围、数量上限和停止条件，不能把“调试”理解成无影响。
-- Web 使用滚动部署并验证 readiness，保留可服务实例；不要为升级 Account 停掉 Web。
-- 部署前确认构建成功、不可变镜像 SHA、现网旧镜像和回滚目标；部署后分别验证应用状态与真实业务。
-- **脚本当前陷阱**：即使 `SAE_DEPLOY_ROLES=web`，脚本末尾仍无条件执行 `deploy_account_singleton`。不能用此变量当作“仅部署 Web”的保证。先读脚本，不在排查中顺手执行全角色部署。
-- 不存在名为 Bot 的独立 SAE 角色；按代码入口和当前 ENV 判定需要升级的应用。
+## 3. CLS
 
-## 5. 推送、采集与媒体排查
+生产业务主题为 `xiaohuiji-tke-business`。调度、拉镜像和探针告警到事件主题核对，谁改了工作负载到审计主题核对。用 CLI 查看当下主题名和 ID。
 
-沿同一个业务 ID 检查：源消息 → collect_event / collect_dispatch → content_profile / media / profile_state → tg_job → Outbox → delivery Attempt / 已发送消息。实际表名及字段先通过 DBX 描述表或源码确认。
+```bash
+tccli cls DescribeTopics --region ap-singapore \
+  | jq '(.Response // .).Topics[] | {TopicName,TopicId}'
+```
 
-常用代码位于 `server/addons/youban_publish/logic/sys/`：
+业务主题 ID 为 `78dbfc24-a063-4a29-b758-ac9ad5fd7cac`。以下示例查看最近 15 分钟错误相关记录，仅输出时间、等级和容器，避免完整载荷进入排查记录。
 
-| 文件/范围 | 用途 |
+```bash
+to_ms=$(($(date +%s) * 1000))
+from_ms=$((to_ms - 15 * 60 * 1000))
+tccli cls SearchLog --region ap-singapore \
+  --TopicId 78dbfc24-a063-4a29-b758-ac9ad5fd7cac \
+  --From "$from_ms" --To "$to_ms" --Limit 100 --Sort desc \
+  --QueryString '(ERRO OR ERROR OR FATAL OR panic OR timeout OR "connection refused" OR SQLSTATE)' \
+  | jq -e '(.Response // .) | select(.ListOver | type == "boolean") | {complete: .ListOver, rows: [
+      .Results[]? | .Time as $time | (.LogJson | fromjson)
+      | select(.__TAG__.namespace == "xiaohuiji")
+      | {time_ms: $time, container: .__TAG__.container_name,
+         level: (try (.__CONTENT__ | capture("\\[(?<level>ERRO|ERROR|WARN|FATAL|PANIC)\\]").level) catch null)}
+    ]}'
+```
+
+- 关键词产生候选日志，按应用实际级别和因果归类。确认原始 `LogJson` 的结构与索引后，再按角色、Trace ID、业务 ID 和时间窗过滤。字段在内容里时先用全文检索。
+- `ListOver=false` 时用原始响应的 `Context` 继续翻页，沿用同一主题、时间窗、语句和排序。窗口未查完时用“至少”描述结果。零错误需同时验证该角色有日志流入。
+- 用 Grafana 的 HTTP 5xx 和分位耗时校验日志趋势，再按 Trace ID 查应用、数据库和 Redis 操作。不能用 CLS 中搜到的 `503` 字符串替代真实 HTTP 状态码计数。频道发布专题见 [CLS 频道队列排查](publish-queue-cls.md)。 [CLS 检索语法](https://cloud.tencent.com/document/product/614/47044)
+
+## 4. Pod、Deployment 与 Service
+
+按 [TKE 连接步骤](../deploy/TKE.md#连接与权限) 建立 Bash 数组 `k`。只读排查先用名称和范围缩小检索。
+
+```bash
+"${k[@]}" get deploy,rs,pod,svc -o wide
+"${k[@]}" get events --sort-by=.lastTimestamp | tail -30
+"${k[@]}" get endpointslices -l kubernetes.io/service-name=web -o wide
+
+pod='<实际 Pod 名>'
+container='<实际容器名>'
+"${k[@]}" describe pod "$pod"
+"${k[@]}" logs "$pod" -c "$container" --since=15m --tail=200 --timestamps
+# 容器已重启且存在上一次实例时执行
+"${k[@]}" logs "$pod" -c "$container" --previous --tail=100 --timestamps
+```
+
+| 现象 | 检查 |
 |---|---|
-| `tg_outbox.go`、`tg_channel_order.go` | 调度、频道前序任务与发送槽 |
-| `tg_send_job.go`、`tg_delivery_attempt.go` | 发送状态、成功确认、未知结果与恢复 |
-| `tg_send_media.go`、`telegram_collector_adapter.go` | Bot 媒体发送、协议号降级 |
-| `collect_process_queue.go`、`collect_process_outbox.go` | 采集处理与持久化任务 |
-| `note_index_query.go`、`note_index_projection.go`、`profile_query.go` | 列表读模型及补全 |
+| Pending / FailedScheduling | CPU 和内存 requests、配额、容忍配置和网络子网 IP |
+| ImagePullBackOff | TCR 仓库、部署摘要、节点访问及 imagePullSecret 引用 |
+| CrashLoopBackOff / OOMKilled | 上一个实例退出原因、启动参数、资源上限、Secret 和 ConfigMap 引用 |
+| Ready Pod 为零或响应 503 | 检查 `readyz`、Service selector、EndpointSlice ready 状态及 CLB 后端 |
+| Pod 正常但消费停滞 | 按角色查队列年龄、租约、最后一条任务日志和依赖耗时 |
 
-这些是查找入口，不代替当前代码事实。定位规则：
+取证时只摘取事件或日志的必要字段。容器缺少工具时优先使用现有已授权的调试入口。需要额外探测时使用受限 Job 或调试 Pod、固定镜像摘要、短超时、资源限额和应用同一网络路径，执行 DNS、TLS、只读探测后清理。禁止在调试 Pod 或本地启动使用生产配置的消费者。
 
-- `dispatcher selected jobs:N` 只能证明选中任务；继续检查入队、前序检查、槽、消费者开始、API 返回、落库完成各节点。
-- `failed + display_confirmed`、unknown、租约过期、账号未登录等要分别判断；不能批量重置所有任务或重新上架所有资料。
-- API 明确成功与发送结果未知分开处理。明确成功无需远端对账；超时不能当作“肯定未发送”。任何降级/重发都要检查迟到回执与重复消息风险。
-- `chat not found` / `bot is not a member` 是目标可见性/成员资格线索，先核实 chat、Bot 及历史成功记录；不是下载超时，不能靠二进制上传解决。
-- `WEBPAGE_CURL_FAILED` 检查 URL 回源与链路降级；媒体 404 检查 COS/CDN 与源消息能否恢复。
-- `mode=reuse,hasFileId=true` 是发送选择证据，但需同时确认同 Bot、最终实际分支和结果。防扫图修改图片后不可复用未经处理的原始媒体。
-- 验证视频缺失先核对来源上下文、事件接收/编辑时间、匹配、入库及发送阶段；不能把展示消息发布时间当成源视频 webhook 接收时间。
+## 5. 故障收尾
 
-Redis 增长按应用实际 endpoint、逻辑 DB、队列类型检查 INFO memory/stats/keyspace、待处理/重试/归档数量、TTL 与生产/消费速率。计数很大不代表都是有效待发送业务；先分类。禁止以清库、KEYS *、全量重试来代替定位。
+记录影响角色、故障时段和样本、原因及证据、实际操作、回滚和剩余风险。分别复查入口 `/readyz`、一条真实只读业务请求、CLS 新增错误、PostgreSQL 锁与 Redis 队列趋势。健康探测通过只证明该次探测通过。
 
-## 6. 已部署运维 MCP 与本地工具
-
-当前会话可发现的 `youban_ops` 工具：
-
-- `resolve_profile_by_message`：消息链接或 chat/message ID → 资料、来源。
-- `collect_diagnose_message`：采集与发布诊断。
-- `collect_preview_repair` / `collect_apply_repair`：先生成有界修复方案，再按方案应用。
-- `profile_preview_operation` / `profile_apply_operation`：下架、重新上架、删除方案。
-- `profile_media_preview` / `profile_media_apply`：媒体恢复。
-- `verification_preview_missing` / `verification_apply_repair`：验证媒体恢复及完整资料替换发布。
-- `ops_plan_status`：查询执行结果。
-
-先读取当前工具 schema，preview 不等于 apply 成功；apply 必须符合用户授权范围并核对方案、租户、数量。不把历史验证恢复做成散发孤立验证视频。MCP 是否可用要看调用响应，只有配置文件不代表通链。
-
-本地可复用工具：`server/tools/collect_repair/README.md`、`collect_edit_audit/README.md`、`media_md5_backfill/README.md`；另有 `media_salvage`、`media_salvage_enqueue`、`tg_dispatch_repair`。先读说明/参数和默认是否写入，不能直接运行到生产。
-
-## 7. 列表慢查询最新交接
-
-提交 `93f6326b` 优化 `/api/youban_publish/publish/admin/note/list`。原请求 `accountScope=all&sourceScope=collected&sortBy=createdAt&page=1&perPage=20` 的历史 SQL 为 30.57 秒：空结果仍扫描约 40 万索引行并逐条关联 profile/state。
-
-线上已完成：`note_index.is_collected` 字段、旧写入兼容触发器、分批回填、来源与创建/发布时间组合索引；完整来源一致性校验 mismatch=0。应用查询改为读模型来源过滤。细节、回滚、SQL 及样本结果见：
-
-`server/addons/youban_publish/resource/sql/note_index_source_scope.md`
-
-完整原权限参数的新 SQL 执行 0.201ms；发布时间样本修复后 0.032ms。这不是 HTTP 总耗时。城市、标签、来源等部分组合仍扫描较多行，尚未证明所有组合“秒回”。截至本次交接，未完成登录后的端到端测试，不能把本地 commit 当成已发布。
-
-真实接口探针（从 server 目录执行）：
-
-```sh
-python3 tools/note_list_probe.py --token-file /path/to/existing-token --repeat 3
-```
-
-使用用户现有登录身份，或环境变量 `YOUBAN_PROBE_TOKEN`；无凭据时不能通过伪造 Token/修改鉴权绕过。`--cases-file` 可传 case 名到参数对象的 JSON，覆盖来源、账号、状态、地区、标签、关键字、采集来源、两种排序和下一页 cursor。记录成功响应、数量、P95/最大耗时与 traceID；401、healthz、单条 SQL 快都不等于接口验收通过。
-
-专项本地测试需要独立 PostgreSQL，测试仅接受固定本机临时库连接，默认跳过，不连接生产：
-
-```sh
-YOUBAN_NOTE_INDEX_TEST_PG='pgsql:test:@tcp(127.0.0.1:55483)/postgres' \
-go test ./addons/youban_publish/logic/sys \
-  -run 'Test(NoteIndexSourceScopePostgres|NormalizeAdminNoteSortBy|AdminNoteCursor|AdminNotePublished)' -count=1
-git diff --check
-```
-
-本次临时集群曾使用 `/tmp/youban-random-media-pg.aIDnxn`，已停止，临时目录可能被清理；后续先确认存在及用途再启动，不依赖它长期存在。
-
-## 8. 收尾记录
-
-每次记录：时间与时区、环境/角色/镜像、样本业务 ID、证据、影响范围、变更与行数、验证结果、未验证事项、回滚方法、commit/合并/构建/部署各自状态。不要将历史观察写成永久事实，也不要承诺一次测试覆盖所有生产故障。
-
-## 9. Publish SLS 快速排查
-
-频道无推送的队列事件、租约与恢复排查见 [频道队列 SLS 手册](publish-queue-sls.md)；包含未提取字段时的全文检索兜底。
-采集处理队列的 Redis-first / 历史 Outbox 迁移边界见 [采集处理队列说明](collect-process-queue.md)。
-
-Publish 线上日志使用以下项目：
-
-发送预算、协议号交接及新增链路事件见 [Telegram 发布预算与日志](telegram-publish-budget.md)。排查时同时核对 Publish 和 Account；交接已提交不代表协议号已发送，验证续发 Outbox 已提交也不代表验证 API 已成功。
-
-```text
-Project: sae-2fb5d3db-0975-4dea-b086-805d255131fa
-Logstore: sae-1325481f8155ce1a0e0b76739397e96e
-Region: ap-southeast-1
-Profile: xiaohuiji-sae
-```
-
-查询最近一小时错误：
-
-```sh
-FROM=$(($(date +%s)-3600)); TO=$(date +%s)
-aliyun sls get-logs-v2 \
-  --profile xiaohuiji-sae \
-  --project sae-2fb5d3db-0975-4dea-b086-805d255131fa \
-  --logstore sae-1325481f8155ce1a0e0b76739397e96e \
-  --region ap-southeast-1 --from "$FROM" --to "$TO" \
-  --query '* and ("ERROR" or "WARN" or "失败" or "超时")' \
-  --line 100 --reverse true \
-  --user-agent 'AlibabaCloud-Agent-Skills/alibabacloud-sls-query/7c4f1a2b9d8e4f6a1c3b5e7d9f0a2c4e'
-```
-
-按 trace、任务、频道查询时，直接替换 query：
-
-```sh
---query '"TRACE_ID"'
---query '"jobId":3225583'
---query '"4403292454"'
---query '"获取发送记录总数失败"'
-```
-
-发布链路重点查看 `traceId`、`jobId`、`profileId`、`channelId`、`dispatchStatus`、`jobStatus`、`sendPhase`、`returnedError`、`executionDurationMs`、`deferredReason`。没有 `execution_started` 通常表示队列未消费；`dispatchStatus=queued` 长时间不变表示调度或 Redis/Asynq 消费阻塞；有开始日志但没有完成日志表示执行卡住；接口 `code=52` 必须继续用同一 traceID 搜索底层 SQL 错误。
-
-## 10. SAE 资源反查与 SLS 读取兜底
-
-不要只相信 SLS 控制台 URL 中的 Project/Logstore。先从 SAE Publish 应用读取实际日志绑定：
-
-```sh
-PUBLISH_APP_ID=2fb5d3db-0975-4dea-b086-805d255131fa
-REGION_ID=ap-southeast-1
-aliyun sae ListLogConfigs --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --PageSize 100 --CurrentPage 1 --profile xiaohuiji-sae
-```
-
-输出中的 `SlsProject`、`SlsLogStore` 和 `ConfigName` 才是当前 SAE 绑定的日志资源。`ListLogConfigs` 缺少分页参数时会分别报 `MissingPageSize` 和 `MissingCurrentPage`。
-
-Publish 实例和镜像版本：
-
-```sh
-aliyun sae DescribeApplicationConfig --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --profile xiaohuiji-sae | jq '{AppId:.Data.AppId,ImageUrl:.Data.ImageUrl,Replicas:.Data.Replicas,CommandArgs:.Data.CommandArgs}'
-aliyun sae DescribeApplicationGroups --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --profile xiaohuiji-sae
-aliyun sae DescribeApplicationInstances --RegionId "$REGION_ID" --AppId "$PUBLISH_APP_ID" --GroupId '<DescribeApplicationGroups 返回的 GroupId>' --PageSize 100 --CurrentPage 1 --profile xiaohuiji-sae
-```
-
-当 `get-logs-v2` 返回 `LogStoreNotExist` 时，使用实例 ID 直接读取当前容器 stdout：
-
-```sh
-aliyun sae DescribeInstanceLog --RegionId "$REGION_ID" --InstanceId '<DescribeApplicationInstances 返回的 InstanceId>' --profile xiaohuiji-sae | jq -r '.. | strings' > /tmp/publish-instance.log
-rg -i '全量推送|queueAgeMs|dispatchAgeMs|outbox|failed|超时|TG推送链路' /tmp/publish-instance.log
-```
-
-SLS 查询必须使用 SAE 当前绑定的 `SlsProject`、`SlsLogStore`，并带上 SLS Skill 的 user-agent：
-
-```sh
-aliyun sls get-index --region "$REGION_ID" --profile xiaohuiji-sae --project '<SlsProject>' --logstore '<SlsLogStore>' --user-agent 'AlibabaCloud-Agent-Skills/alibabacloud-sls-query/<session-id>'
-```
-
-如果 `list-log-stores` 能列出 Logstore，但 `get-index`、`get-log-store` 和 `get-logs-v2` 都返回 `LogStoreNotExist`，记录为“CLI 元数据与日志读取接口不一致”，立即改用 `DescribeInstanceLog`，不要据此声称没有线上日志。
-
-SAE 镜像部署前还要检查 ACR：
-
-```sh
-aliyun cr ListInstance --RegionId "$REGION_ID" --profile xiaohuiji-sae
-```
-
-如果 ACR 实例状态为 `STOPPED`，`DeployApplication` 会返回 `InvalidAcrInstance.NotFound` 或 `InvalidImageUrl.MissingAcrInstanceId`。此时 ENV 更新脚本不能完成部署；先恢复有效 ACR 实例或使用仍可用的镜像来源，再重试部署。不要在未成功部署的情况下宣称 ENV 已生效。
+发布或采集故障沿同一业务 ID 关联来源消息、采集事件、资料状态、发布任务、发送尝试和 Telegram 回执。入口代码在 `server/addons/youban_publish/logic/sys/`。已配置的 `youban_ops` 工具可用于样本定位和修复预览，执行前核实实际环境及授权范围。

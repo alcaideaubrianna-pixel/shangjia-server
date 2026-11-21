@@ -1,8 +1,8 @@
 # 采集窗口查询与目标批次复用观测
 
-本文约定 `collect_window_query_completed` 和 `collect_target_batch_reuse` 的统计口径，并给出 SLS 查询模板。**模板未执行，未核实任何生产 Logstore 索引，也不代表字段已经部署或已被解析。**执行前先确认镜像、角色、实际日志样本、字段位置和索引。
+本文约定 `collect_window_query_completed` 和 `collect_target_batch_reuse` 的统计口径，并给出 CLS 查询模板。**模板未执行，未核实任何生产主题索引，也不代表字段已经部署或已被解析。**执行前先确认镜像、角色、实际日志样本、字段位置和索引。
 
-日志载荷与字段提取遵循 [频道队列 SLS 手册](publish-queue-sls.md)，环境选择遵循 [生产排障入口](production-debugging.md)。本页不包含生产写操作、队列恢复或日志索引变更。
+日志载荷与字段提取遵循 [频道队列 CLS 手册](publish-queue-cls.md)，环境选择遵循 [生产排障入口](production-debugging.md)。本页不包含生产写操作、队列恢复或日志索引变更。
 
 字段已按本工作区 `collect_window_observability.go` 及调用点静态核对。两类事件的 `log_type` 均为 `telegram_collect_pipeline`。没有新增 Redis 统计计数器；以下统计直接聚合每次执行输出的日志，不读取 Redis 计数值。
 
@@ -83,44 +83,15 @@ batch 事件同时携带前表的身份字段，包括 canonicalChatId、eventAc
 
 ## 先核对实际载荷与索引
 
-沿用已有文档的实际约束：普通日志加 `g.Map`、JSON 文本、SLS 顶层字段并非同一件事。新增事件名不代表能直接执行 `event:...` 或 `SELECT durationUs`。
+沿用已有文档的实际约束：普通日志加 `g.Map`、JSON 文本、CLS 顶层字段并非同一件事。新增事件名不代表能直接执行 `event:...` 或 `SELECT durationUs`。
 
-1. 选择当前角色实际绑定的 Project/Logstore，以及最近 5～15 分钟窗口。
-2. 查看 `get-index`：全文检索需要 `line`；字段分析需要实际字段索引及 `doc_value=true`。
-3. 读取少量原始样本，核对 event、stage、数值类型、字段位置和大小写。
-4. 确认后再使用以下相应模板；不自动修改索引，不用全量扫描替代缺失前提。
+在 [生产排障手册](production-debugging.md#3-cls) 的业务主题内检索近 5–15 分钟，全文关键词使用 `"collect_window_query_completed" OR "collect_target_batch_reuse"`。读取少量样本核对事件、字段位置及数值类型，再通过主题的索引配置或 `tccli cls DescribeIndex` 确认可统计字段。原文搜索按 `ListOver` 和 `Context` 判断完整性。
 
-本页使用标准化列名 `tenantId/accountId/sourceId/sourceChatId/eventId/traceId`。若真实字段是 `tenant/account`、`traceID` 或嵌套路径，必须替换。数值已是 long/double 时可直接聚合；示例中的 `try_cast` 兼容文本字段，转换失败为 NULL，不能默认填 0 隐藏解析错误。
-
-以下命令仅为待执行模板，变量使用当前授权环境，不填写生产密钥：
-
-```bash
-SLS_SESSION_ID=$(openssl rand -hex 16)
-SLS_UA="AlibabaCloud-Agent-Skills/alibabacloud-sls-query/$SLS_SESSION_ID"
-SLS_PROJECT='<当前角色实际SlsProject>'
-SLS_LOGSTORE='<当前角色实际SlsLogStore>'
-SLS_TO=$(date +%s)
-SLS_FROM=$((SLS_TO - 900))
-aliyun sls get-index \
-  --project "$SLS_PROJECT" --logstore "$SLS_LOGSTORE" \
-  --user-agent "$SLS_UA"
-```
-
-全文索引可用、结构尚未解析时，先找原文，返回后核对字段归属：
-
-```bash
-aliyun sls get-logs-v2 \
-  --project "$SLS_PROJECT" --logstore "$SLS_LOGSTORE" \
-  --from "$SLS_FROM" --to "$SLS_TO" \
-  --query '"collect_window_query_completed" or "collect_target_batch_reuse"' \
-  --line 100 --offset 0 --reverse true --user-agent "$SLS_UA"
-```
-
-结果满页不代表只有 100 条；原文查询按 offset 有界翻页，SQL 按 LIMIT 控制结果数。`meta.progress=Incomplete` 时相同请求重查至 Complete；仍不完整需说明限制，不把部分结果作为全量结论。需要时缩小时间窗和租户/来源范围。
+本页列名是逻辑字段名，执行时按实际索引映射。解析失败保留 NULL，避免将缺失数据显示为零。
 
 ## 已提取为可统计顶层字段时的 SQL
 
-以下采用 SLS `索引检索 | SQL` 形式；仅在对应字段确实已提取且启用统计后使用。执行时将整段作为 `get-logs-v2 --query` 的值，并沿用上述时间范围及 user-agent。
+以下采用 CLS `索引检索 | SQL` 形式；仅在对应字段确实已提取且启用统计后使用。先在 CLS 控制台验证语法和字段，再将经验证的语句传给 `SearchLog --QueryString`。
 
 ### primary/retry 查询量、错误、空结果和独立耗时
 
@@ -218,7 +189,7 @@ event:collect_target_batch_reuse
 
 ## JSON/map 字段未平铺时的适配
 
-若索引实际是嵌套字段，例如 `fields.durationUs`，SQL 中使用实际列名（如 `"fields.durationUs"`），索引过滤也替换为实际配置的路径。不要把 Go 的 map 变量名推测成 SLS 列名；以样本和 `get-index` 为准。
+若索引实际是嵌套字段，例如 `fields.durationUs`，SQL 中使用实际列名（如 `"fields.durationUs"`），索引过滤也替换为实际配置的路径。不要把 Go 的 map 变量名推测成 CLS 列名；以样本和 `DescribeIndex` 为准。
 
 仅当 `content` 是**完整合法 JSON** 且该列可用于 SQL 分析时，可以先提取为标准列，再复用上述聚合。以下示例假设 JSON 中指标在根节点；若在 `fields` 下，应将 `$.durationUs` 改为 `$.fields.durationUs` 等。真实载荷列为 `message` 时也需替换：
 

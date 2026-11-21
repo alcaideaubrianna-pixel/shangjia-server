@@ -2,9 +2,9 @@
 
 本文面向“消息接收 → 原始事件 → Delivery → 发布侧采集事件 → 匹配/配对/媒体准备 → 资料事务提交”，不把 Telegram 发布成功纳入采集成功终点。
 
-**状态：依据 2026-11-17 工作区实现及本轮确定的观测契约编写，尚未部署验收。本文没有执行 SQL、PromQL、测试、编译或生产查询，不代表指标已导出或 SLS 索引已配置。**面板上线前核对实际接收端名称、索引和样本，不得把缺失数据显示为零耗时。
+**状态：依据 2026-11-17 工作区实现及本轮确定的观测契约编写，尚未部署验收。本文没有执行 SQL、PromQL、测试、编译或生产查询，不代表指标已导出或 CLS 索引已配置。**面板上线前核对实际接收端名称、索引和样本，不得把缺失数据显示为零耗时。
 
-相关入口：[Collector 观测说明](collector-observability-hooks.md)、[SLS 查询前提](publish-queue-sls.md)、[生产排障入口](production-debugging.md)。若旧文档与本轮新增字段不同，以最终源码和真实样本核对，不直接拼接两版数据。
+相关入口：[Collector 观测说明](collector-observability-hooks.md)、[CLS 查询前提](publish-queue-cls.md)、[生产排障入口](production-debugging.md)。若旧文档与本轮新增字段不同，以最终源码和真实样本核对，不直接拼接两版数据。
 
 ## 成功、尝试、等待的定义
 
@@ -15,7 +15,7 @@
 - **等待与失败分开**：配对、验证、媒体、锁、配额、延迟重试等返回等待/可重试结果，不直接计为最终失败。重试耗尽/明确终止只有最终业务状态证据才能确认。
 - **进程内耗时、队列等待、端到端耗时分开**：不能把嵌套父子阶段耗时求和；一次处理结束也不能代表长期等待结束。
 
-不以“入口计数减入库计数”推断丢失：来源禁用、系统消息、规则不匹配、多消息归组、多规则分支、已有资料复用和重试都会使两个计数不同。需要唯一数量时，在限定作用域和时间窗的 SLS 中按已确认业务主键去重；日志不完整时只能称“观测到的唯一数量”。
+不以“入口计数减入库计数”推断丢失：来源禁用、系统消息、规则不匹配、多消息归组、多规则分支、已有资料复用和重试都会使两个计数不同。需要唯一数量时，在限定作用域和时间窗的 CLS 中按已确认业务主键去重；日志不完整时只能称“观测到的唯一数量”。
 
 ## 当前实现与新增埋点位置
 
@@ -63,11 +63,11 @@ Publish 阶段如下：
 
 `source_attempt` 的结果明确区分：**源禁用或事件不存在为 ignored，事件已处理且无需修复为 duplicate**；这些路径不能因 nil 返回记为 completed，更不算资料成功。Publish 不新增 skipped 结果，不能沿用 Collector 的 skipped 枚举解释 Publish 指标。source_attempt、规则、事务等均是各自边界的非唯一业务尝试计数，不是唯一事件或资料数。
 
-### SLS 输出策略与覆盖偏差
+### CLS 输出策略与覆盖偏差
 
-小于 100ms 的普通成功子步骤只记录指标/trace，不额外输出 SLS 阶段日志；pending、failure 及 persisted 等关键结果保留全量结果日志。这里的“全量”指应用侧符合策略的每次调用均记录，不保证日志运输、索引或查询结果没有缺失。
+小于 100ms 的普通成功子步骤只记录指标/trace，不额外输出 CLS 阶段日志；pending、failure 及 persisted 等关键结果保留全量结果日志。这里的“全量”指应用侧符合策略的每次调用均记录，不保证日志运输、索引或查询结果没有缺失。
 
-因此普通成功子步骤的 SLS 样本带有耗时阈值选择偏差，**不能用 SLS 统计所有快成功子阶段的 P95、平均值或完整 attempt 总量**。阶段总体分位数从 OTel Histogram 读取；Trace 明细受采样影响。关键结果日志可用于按频道下钻，但仍不能转换为唯一新增资料数。
+因此普通成功子步骤的 CLS 样本带有耗时阈值选择偏差，**不能用 CLS 统计所有快成功子阶段的 P95、平均值或完整 attempt 总量**。阶段总体分位数从 OTel Histogram 读取；Trace 明细受采样影响。关键结果日志可用于按频道下钻，但仍不能转换为唯一新增资料数。
 
 ## 维度契约
 
@@ -86,7 +86,7 @@ Publish pipeline 标签为 `stage,result,source_type,collection_mode`。Collecto
 
 **禁止将 tenant/account/Bot/source/channel/rule/event/delivery/profile/message/trace ID 放入 Histogram 标签。**尤其不能用完整队列名、错误正文、动态等待消息代替固定标签。每增加一个 ID 维度都会与阶段、结果、buckets 相乘，不能因当前频道少就假设长期安全。
 
-### 频道、Bot 与账户通过 span/SLS 下钻
+### 频道、Bot 与账户通过 span/CLS 下钻
 
 建议面板筛选和日志字段以最终实现映射以下含义：
 
@@ -126,7 +126,7 @@ Publish pipeline 标签为 `stage,result,source_type,collection_mode`。Collecto
 
 Collector 的 `collectorTaskPayload/parseCollectorTaskID` 是数字协议，不能直接换 JSON 破坏旧消费者。Asynq 的 EnqueueContext 不会传输任意 context.Value；消费者的 task ID/retry count/queue 元数据也不是 producer carrier。
 
-现有 direct 同步交接可以保留父子 span；跨 Asynq 消费未建立 carrier 时，新建本次 attempt span，通过业务 ID/SLS 关联。不得通过固定 TraceID、猜测 span ID 或强行复用上次上下文制造完整 Trace。本轮边界为 **noSQL/noRedis/noQueueSchema**：不为观测新增 SQL/Redis 查询或写入，不新增 sidecar、carrier 持久化，不改变队列 payload/schema、Unique 哈希或调度协议。复用业务已有读取结果，不改变原有业务 I/O。
+现有 direct 同步交接可以保留父子 span；跨 Asynq 消费未建立 carrier 时，新建本次 attempt span，通过业务 ID/CLS 关联。不得通过固定 TraceID、猜测 span ID 或强行复用上次上下文制造完整 Trace。本轮边界为 **noSQL/noRedis/noQueueSchema**：不为观测新增 SQL/Redis 查询或写入，不新增 sidecar、carrier 持久化，不改变队列 payload/schema、Unique 哈希或调度协议。复用业务已有读取结果，不改变原有业务 I/O。
 
 ### 嵌套耗时
 
@@ -150,16 +150,16 @@ Collector 的 `collectorTaskPayload/parseCollectorTaskID` 是数字协议，不�
 | xiaohuiji.collect.pipeline.operations | Publish 阶段 attempt 数 | 事务 persisted 与调用 nil/queued 不同 |
 | xiaohuiji.collect.pipeline.duration_seconds | Publish 各阶段执行耗时 | admission 按 Job 计数，无须为每个 ID重复记录批次耗时 |
 
-旧 ingest/delivery 指标与 pipeline 指标不要相加。Trace 采样率不是 metric 采样率；SLS 与 Trace 缺失也可能是采集、采样或索引问题，不直接推断业务未执行。
+旧 ingest/delivery 指标与 pipeline 指标不要相加。Trace 采样率不是 metric 采样率；CLS 与 Trace 缺失也可能是采集、采样或索引问题，不直接推断业务未执行。
 
 建议六组面板：
 
 1. **观测质量**：unknown source/mode 比例、时间 missing/future 次数、角色/版本是否覆盖。先看数据可靠性。
 2. **入口与交付**：Collector 按 bot/account、realtime/history 展示 accepted/skipped/error attempt；Publish source_attempt 的源禁用/事件不存在为 ignored，已处理无需修复为 duplicate。direct 不强制出现 delivery_enqueue。
-3. **匹配和等待**：授权/规则匹配/配对/媒体阶段的成功、跳过、等待、失败与 P50/P95/P99。等待原因明细从 SLS 看，不把自由文本加为 metric label。
+3. **匹配和等待**：授权/规则匹配/配对/媒体阶段的成功、跳过、等待、失败与 P50/P95/P99。等待原因明细从 CLS 看，不把自由文本加为 metric label。
 4. **资料入库**：profile 事务成功 attempt、失败 attempt、阶段 P95；persisted 包含复用，不能区分新增。标题不能写成“唯一资料入库数”。
 5. **窗口成本**：primary/retry 查询量、错误率、成功空查询率、ORM P95、batch hit/miss/not_evaluated 和未进入 run 的 miss。
-6. **频道排查表**：按 tenant/account/source/canonicalChatId/Bot/运行账号从 SLS 小窗口聚合最后阶段、等待原因、失败 attempt、观测到的持久化成功；点击进入 event/rule/profile 日志链路，不做全量 DB 报表扫描。
+6. **频道排查表**：按 tenant/account/source/canonicalChatId/Bot/运行账号从 CLS 小窗口聚合最后阶段、等待原因、失败 attempt、观测到的持久化成功；点击进入 event/rule/profile 日志链路，不做全量 DB 报表扫描。
 
 不能用 submit 或 ingress attempt 作分母、profile persisted 作分子生成“消息采集成功率”：两者基数不同。可展示同一 profile 持久化阶段的成功尝试比例，但名称必须包含“尝试”，等待与复用也需明确口径。
 
@@ -205,9 +205,9 @@ sum by (stage, source_type, collection_mode, result) (
 
 等待 Histogram 没有有效样本时显示“无可靠样本”，另展示 wait_samples 的 sample 分布；不得把空向量填 0 后宣称队列健康。
 
-### SLS 频道与已记录阶段样本聚合
+### CLS 频道与已记录阶段样本聚合
 
-执行前遵循已有 SLS 手册核对真实日志绑定、时间窗、原文及索引。g.Map 可能仍包在 content/message 中，不能假定是顶层字段；需要字段统计配置，未解析时先全文检索。以下仅是顶层字段提取完成后的模板。**同一 stage 的普通快成功子步骤没有逐条 SLS 日志，因此本模板只统计已记录结果，不计算完整阶段平均耗时或 P95；完整阶段分位数使用 OTel Histogram。**
+执行前遵循已有 CLS 手册核对真实日志绑定、时间窗、原文及索引。g.Map 可能仍包在 content/message 中，不能假定是顶层字段；需要字段统计配置，未解析时先全文检索。以下仅是顶层字段提取完成后的模板。**同一 stage 的普通快成功子步骤没有逐条 CLS 日志，因此本模板只统计已记录结果，不计算完整阶段平均耗时或 P95；完整阶段分位数使用 OTel Histogram。**
 
 ```sql
 event:collect_stage_completed
@@ -240,7 +240,7 @@ event:collect_window_query_completed
 
 emptyQueryCount 仅成功且 rows=0 时为 1；错误不算空。batch 命中率分母只用 hit+miss，not_evaluated 不纳入；miss 不保证 SQL 已执行。rowsLoaded/windowTruncated 仅 batchRunStarted=true 时有效，hit 的 0/false 不计为空窗口。
 
-SLS LIMIT 仅限制返回行数，不保证查询成本有界；先选最近 5～15 分钟及明确作用域。结果 Incomplete、日志采样或索引延迟时需标注统计不完整，不能拿来声称资料丢失或完成全量验收。
+CLS LIMIT 仅限制返回行数，不保证查询成本有界；先选最近 5～15 分钟及明确作用域。结果未翻完、日志采样或索引延迟时需标注统计不完整，不能拿来声称资料丢失或完成全量验收。
 
 ## 最终接线核对
 
@@ -250,5 +250,5 @@ SLS LIMIT 仅限制返回行数，不保证查询成本有界；先选最近 5�
 - 并发规则和跨事件处理不串上下文；观测不改变业务归属、租约、去重或队列路由。
 - 现有业务读取的数据直接绑定 ctx；不为指标新增 DB/Redis 查询、扫描、写计数器或后台循环。
 - 超时、取消、panic、禁用、去重、等待、事务回滚均需准确分类；未完成验证的场景列出限制，不称已通过。
-- 快成功子步骤只指标/trace；pending/failure/persisted 等关键结果记录日志。SLS 样本分位数不能替代完整 OTel 分位数。
+- 快成功子步骤只指标/trace；pending/failure/persisted 等关键结果记录日志。CLS 样本分位数不能替代完整 OTel 分位数。
 - 受限验证和部署之后，再根据真实遥测样本启用面板。本文尚未部署验收，也不是测试通过记录。
