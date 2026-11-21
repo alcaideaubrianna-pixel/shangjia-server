@@ -204,3 +204,69 @@ func TestAccountDeletionNoticeLocalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAccountNoticeCandidatesLocalPostgres(t *testing.T) {
+	if os.Getenv("YOUBAN_LOCAL_COLLECT_PG") != "1" {
+		t.Skip("requires disposable local PostgreSQL")
+	}
+	before := gdb.GetConfig("default")
+	t.Cleanup(func() { gdb.SetConfigGroup("default", before) })
+	gdb.SetConfigGroup("default", gdb.ConfigGroup{{Type: "pgsql", Host: "127.0.0.1", Port: "35432", User: os.Getenv("USER"), Name: "postgres"}})
+	err := g.DB().Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
+		if _, err := tx.Exec(`CREATE TEMP TABLE hg_youban_publish_account_notice(id bigserial PRIMARY KEY,tenant_id bigint NOT NULL,account_id bigint NOT NULL,event_key varchar(128) NOT NULL,category varchar(32) NOT NULL DEFAULT 'account',text_content text NOT NULL,status varchar(16) NOT NULL DEFAULT 'pending',attempts int NOT NULL DEFAULT 0,next_retry_at timestamp,lease_until timestamp,lease_token varchar(64) NOT NULL DEFAULT '',error_message varchar(512) NOT NULL DEFAULT '',created_at timestamp,updated_at timestamp,UNIQUE(event_key,account_id)) ON COMMIT DROP`); err != nil {
+			return err
+		}
+
+		scanAt := time.Now().Truncate(time.Second)
+		cutoff := scanAt.AddDate(0, 0, -30)
+		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_account_notice
+			(id,tenant_id,account_id,event_key,text_content,status,attempts,next_retry_at,lease_until,created_at)
+			VALUES
+			(10001,1,2,'expired-lease','','bot_sending',4,NULL,?,?),
+			(10002,1,2,'due-retry','','failed',0,?,NULL,?),
+			(10003,1,2,'immediate','','bot_pending',0,NULL,NULL,?),
+			(10004,1,2,'future-retry','','pending',0,?,NULL,?),
+			(10005,1,2,'missing-lease','','sending',0,NULL,NULL,?),
+			(10006,1,2,'exhausted','','pending',5,NULL,NULL,?)`,
+			scanAt, cutoff, scanAt, cutoff, cutoff, scanAt.Add(time.Second), cutoff, cutoff, cutoff); err != nil {
+			return err
+		}
+		candidates, err := loadAccountNoticeCandidates(ctx, scanAt, 2)
+		if err != nil {
+			return err
+		}
+		if len(candidates) != 2 || candidates[0].Id != 10001 || candidates[1].Id != 10002 {
+			t.Fatal("candidate limit did not apply across all three branches", candidates)
+		}
+		candidates, err = loadAccountNoticeCandidates(ctx, scanAt, 20)
+		if err != nil {
+			return err
+		}
+		if len(candidates) != 3 || candidates[2].Id != 10003 {
+			t.Fatal("candidate predicates changed", candidates)
+		}
+		if _, err := tx.Exec(`INSERT INTO hg_youban_publish_account_notice
+			(tenant_id,account_id,event_key,text_content,status,created_at)
+			SELECT 1,2,'expired-' || n,'','pending',? FROM generate_series(1,501) n`,
+			cutoff.Add(-time.Second)); err != nil {
+			return err
+		}
+		if err := pruneAccountNotices(ctx, scanAt); err != nil {
+			return err
+		}
+		row, err := tx.GetOne(`SELECT
+			COUNT(*) FILTER (WHERE created_at < ?) AS expired,
+			COUNT(*) FILTER (WHERE id BETWEEN 10001 AND 10006) AS retained
+			FROM hg_youban_publish_account_notice`, cutoff)
+		if err != nil {
+			return err
+		}
+		if row["expired"].Int() != 1 || row["retained"].Int() != 6 {
+			t.Fatal("unexpected bounded cleanup result", row)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

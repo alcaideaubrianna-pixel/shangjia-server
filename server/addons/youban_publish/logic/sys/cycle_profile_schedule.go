@@ -105,8 +105,9 @@ var accountCycleCompensationSlots = make(chan struct{}, 2)
 var accountCycleDuplicateCandidates, _ = publishObserveMeter.Int64Counter("xiaohuiji.publish.cycle.candidates_deduplicated")
 
 func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int, scope publishAccountScope) ([]profileCycleDueRow, error) {
-	if limit <= 0 || limit > 20 {
-		limit = 20
+	const pageSize, batchSize = 20, 60
+	if limit <= 0 || limit > pageSize {
+		limit = pageSize
 	}
 	if scope.TenantID <= 0 || scope.AccountID <= 0 {
 		return nil, nil
@@ -115,7 +116,7 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 	var result []profileCycleDueRow
 	validated := make(map[int64]struct{})
 	seen := make(map[int64]bool)
-	validate := func(ids []int64) error {
+	uniqueJobs := func(ids []int64) []int64 {
 		unique := ids[:0]
 		for _, id := range ids {
 			if _, exists := validated[id]; exists {
@@ -124,22 +125,22 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 			validated[id] = struct{}{}
 			unique = append(unique, id)
 		}
-		if skipped := len(ids) - len(unique); skipped > 0 {
-			accountCycleDuplicateCandidates.Add(ctx, int64(skipped))
-		}
-		ids = unique
+		return unique
+	}
+	cutoff := gtime.Now()
+	loadEligible := func(ids, relationIDs []int64) ([]profileCycleDueRow, error) {
 		if len(ids) == 0 {
-			return nil
+			return nil, nil
 		}
 		var rows []profileCycleDueRow
-		err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
 			InnerJoin(publishChannelProfileTable+" cp", "cp.last_job_id=j.id AND cp.tenant_id=j.tenant_id AND cp.account_id=j.account_id AND cp.channel_id=j.channel_id AND cp.profile_id=j.profile_id").
 			InnerJoin("hg_content_profile p", "p.id=j.profile_id AND p.deleted_at IS NULL").
 			InnerJoin(publishChannelTable+" c", "c.id=j.channel_id AND c.tenant_id=j.tenant_id AND c.deleted_at IS NULL").
 			InnerJoin(publishProfileStateTable+" ps", "ps.profile_id=j.profile_id AND ps.tenant_id=j.tenant_id AND ps.account_id=j.account_id AND ps.deleted_at IS NULL").
 			Fields("j.id AS job_id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.sent_at,j.cycle_days,j.cycle_publish_time,j.profile_cycle_version,cp.id AS relation_id,cp.next_cycle_at,cp.cycle_generation AS dispatch_count,j.cycle_failure_count,ps.cycle_override_enabled,ps.cycle_override_days,ps.cycle_override_version,c.cycle_config_version AS channel_version,c.cycle_publish_enabled AS channel_enabled,c.cycle_publish_mode AS channel_mode,c.cycle_publish_days AS channel_days,c.cycle_publish_time AS channel_publish_time,c.status AS channel_status,c.publish_direction").
 			WhereIn("j.id", ids).Where("j.tenant_id", scope.TenantID).Where("j.account_id", scope.AccountID).
-			Where("cp.status", "active").WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", gtime.Now()).
+			Where("cp.status", "active").WhereNotNull("cp.next_cycle_at").WhereLTE("cp.next_cycle_at", cutoff).
 			WhereIn("j.status", []string{"sent", "superseded"}).
 			Where("p.status", 1).Where("p.visibility", consts.ContentVisibilityPublic).
 			Where("c.status", 1).Where("c.cycle_publish_enabled", 1).Where("c.publish_direction", "up").
@@ -147,9 +148,23 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 			Where("NOT EXISTS (SELECT 1 FROM " + channelPermissionCircuitTable + " pc WHERE pc.tenant_id=j.tenant_id AND pc.channel_id=j.channel_id AND pc.paused=1)").
 			Where("NOT EXISTS (SELECT 1 FROM " + publishTgJobTable + " a WHERE a.tenant_id=j.tenant_id AND a.account_id=j.account_id AND a.profile_id=j.profile_id AND a.channel_id=j.channel_id AND a.status IN ('pending','sending','confirming','failed_retry','unknown'))").
 			Where("NOT EXISTS (SELECT 1 FROM " + publishProfileCycleRunChannelTable + " rc JOIN " + publishProfileCycleRunTable + " r ON r.id=rc.run_id WHERE r.tenant_id=j.tenant_id AND r.account_id=j.account_id AND r.profile_id=j.profile_id AND rc.channel_id=j.channel_id AND r.status IN ('pending','running','dispatching') AND rc.status IN ('pending','running','dispatching'))").
-			OrderAsc("cp.next_cycle_at").OrderAsc("cp.id").Limit(20).Scan(&rows)
-		if err != nil {
-			return gerror.Wrap(err, "校验账户循环候选失败")
+			OrderAsc("cp.next_cycle_at").OrderAsc("cp.id")
+		if len(relationIDs) > 0 {
+			model = model.WhereIn("cp.id", relationIDs)
+		} else {
+			model = model.Limit(pageSize)
+		}
+		if err := model.Scan(&rows); err != nil {
+			return nil, gerror.Wrap(err, "校验账户循环候选失败")
+		}
+		return rows, nil
+	}
+	applyPage := func(ids []int64, rows []profileCycleDueRow, duplicates int) error {
+		if duplicates > 0 {
+			accountCycleDuplicateCandidates.Add(ctx, int64(duplicates))
+		}
+		if len(ids) == 0 {
+			return nil
 		}
 		for _, id := range ids {
 			if cache.Initialized() {
@@ -189,7 +204,7 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 		return s.updateProfileCycleRescheduleBatch(ctx, profileCycleChannelConfig{}, rebuildRows, now)
 	}
 	if cache.Initialized() {
-		members, err := cache.ZSetRangeByScore(ctx, key, 0, float64(time.Now().Unix()), 20)
+		members, err := cache.ZSetRangeByScore(ctx, key, 0, float64(cutoff.Unix()), pageSize)
 		if err == nil {
 			var ids []int64
 			for _, member := range members {
@@ -200,7 +215,13 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 					_ = cache.ZSetRemove(ctx, key, member)
 				}
 			}
-			if err = validate(ids); err != nil {
+			count := len(ids)
+			ids = uniqueJobs(ids)
+			rows, err := loadEligible(ids, nil)
+			if err != nil {
+				return nil, err
+			}
+			if err = applyPage(ids, rows, count-len(ids)); err != nil {
 				return nil, err
 			}
 		}
@@ -225,8 +246,7 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 			}
 			return result, nil
 		}
-	}
-	for page := 0; page < 3 && len(result) < limit; page++ {
+
 		var candidates []struct {
 			ID        int64
 			LastJobID int64       `orm:"last_job_id"`
@@ -234,31 +254,73 @@ func (s *sSysPublish) accountProfileCycleDueRows(ctx context.Context, limit int,
 		}
 		model := g.DB().Model(publishChannelProfileTable).Safe().Ctx(ctx).
 			Fields("id,last_job_id,next_cycle_at").Where("tenant_id", scope.TenantID).Where("account_id", scope.AccountID).
-			Where("status", "active").WhereNotNull("next_cycle_at").WhereLTE("next_cycle_at", gtime.Now())
+			Where("status", "active").WhereNotNull("next_cycle_at").WhereLTE("next_cycle_at", cutoff)
 		if cursor.At != nil {
 			model = model.Where("(next_cycle_at,id)>(?,?)", cursor.At, cursor.ID)
 		}
-		if err := model.OrderAsc("next_cycle_at").OrderAsc("id").Limit(20).Scan(&candidates); err != nil {
+		if err := model.OrderAsc("next_cycle_at").OrderAsc("id").Limit(batchSize).Scan(&candidates); err != nil {
 			return nil, gerror.Wrap(err, "读取账户循环补偿候选失败")
 		}
-		more = len(candidates) == 20
-		if len(candidates) == 0 {
-			cursor = accountCycleDueCursor{}
-			break
+
+		// Read eligibility once, then apply Redis and rebuild changes only to consumed pages.
+		type candidatePage struct {
+			ids        []int64
+			rows       []profileCycleDueRow
+			duplicates int
 		}
-		var ids []int64
-		for _, c := range candidates {
-			if c.LastJobID > 0 {
-				ids = append(ids, c.LastJobID)
+		pages := make([]candidatePage, (len(candidates)+pageSize-1)/pageSize)
+		pageByJob := make(map[int64]int, len(candidates))
+		jobByRelation := make(map[int64]int64, len(candidates))
+		var ids, relationIDs []int64
+		for i := range pages {
+			start := i * pageSize
+			end := min(start+pageSize, len(candidates))
+			var pageIDs []int64
+			for _, candidate := range candidates[start:end] {
+				if candidate.LastJobID > 0 {
+					pageIDs = append(pageIDs, candidate.LastJobID)
+					relationIDs = append(relationIDs, candidate.ID)
+					jobByRelation[candidate.ID] = candidate.LastJobID
+				}
 			}
-			cursor = accountCycleDueCursor{At: c.NextAt, ID: c.ID}
+			count := len(pageIDs)
+			pageIDs = uniqueJobs(pageIDs)
+			pages[i].ids = pageIDs
+			pages[i].duplicates = count - len(pageIDs)
+			for _, id := range pageIDs {
+				pageByJob[id] = i
+			}
+			ids = append(ids, pageIDs...)
 		}
-		if err := validate(ids); err != nil {
+		rows, err := loadEligible(ids, relationIDs)
+		if err != nil {
 			return nil, err
 		}
-		if len(candidates) < 20 {
+		for _, row := range rows {
+			i, found := pageByJob[row.JobId]
+			if found && jobByRelation[row.RelationId] == row.JobId && len(pages[i].rows) < pageSize {
+				pages[i].rows = append(pages[i].rows, row)
+			}
+		}
+		for i, page := range pages {
+			if err := applyPage(page.ids, page.rows, page.duplicates); err != nil {
+				return nil, err
+			}
+			end := min((i+1)*pageSize, len(candidates))
+			last := candidates[end-1]
+			cursor = accountCycleDueCursor{At: last.NextAt, ID: last.ID}
+			more = end-i*pageSize == pageSize
+			if !more {
+				cursor = accountCycleDueCursor{}
+			}
+			if len(result) >= limit {
+				break
+			}
+		}
+		// A short prefetch also covers the empty probe after an exact 20/40 rows.
+		if len(result) < limit && len(candidates) < batchSize {
 			cursor = accountCycleDueCursor{}
-			break
+			more = false
 		}
 	}
 	if cache.Initialized() {
@@ -607,12 +669,20 @@ func (s *sSysPublish) refreshChannelProfileCycleNextAt(ctx context.Context, chan
 	if channelId <= 0 {
 		return nil
 	}
-	// 频道本身已经是最小调度分片；使用有序 LIMIT 1 读取队首，避免对该频道全部资料执行 MIN 聚合。
-	value, err := g.DB().Model(publishChannelProfileTable+" cp").Safe().Ctx(ctx).
-		InnerJoin(publishTgJobTable+" j", "j.id=cp.last_job_id AND j.cycle_enabled=1 AND j.status IN ('sent','superseded')").
-		Where("cp.channel_id", channelId).Where("cp.status", "active").
-		Where("j.next_cycle_at IS NOT NULL").
-		Fields("j.next_cycle_at").OrderAsc("j.next_cycle_at").Limit(1).Value()
+	// The mapping upsert takes channel_id and last_job_id from the same job.
+	// Check only one active mapping per candidate so the ordered job scan can stop at the first match.
+	value, err := g.DB().GetValue(ctx, `
+		SELECT j.next_cycle_at
+		FROM `+publishTgJobTable+` j
+		JOIN LATERAL (
+			SELECT 1 FROM `+publishChannelProfileTable+` cp
+			WHERE cp.last_job_id=j.id AND cp.channel_id=j.channel_id AND cp.status='active'
+			LIMIT 1
+		) mapping ON TRUE
+		WHERE j.channel_id=? AND j.cycle_enabled=1
+		  AND j.status IN ('sent','superseded') AND j.next_cycle_at IS NOT NULL
+		ORDER BY j.next_cycle_at, j.id
+		LIMIT 1`, channelId)
 	if err != nil {
 		return gerror.Wrap(err, "刷新频道下次循环时间失败")
 	}

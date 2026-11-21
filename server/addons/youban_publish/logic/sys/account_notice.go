@@ -20,6 +20,7 @@ import (
 	"hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/internal/model/entity"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/consts"
 )
 
 // Both web/admin and Bot account deletion persist notices in this transaction.
@@ -113,9 +114,50 @@ func accountNoticeDue() string {
 	return "((status IN ('pending','failed','bot_pending','bot_failed') AND (next_retry_at IS NULL OR next_retry_at<=?)) OR (status IN ('sending','bot_sending') AND lease_until<=?))"
 }
 
+func accountNoticeCandidatesPostgresSQL() string {
+	dao := pdao.YoubanPublishAccountNotice
+	cols := dao.Columns()
+	// Filter using the due index before applying ID order. An ordered LIMIT
+	// on the base table can pick the primary key and scan historical rows.
+	return fmt.Sprintf(`WITH eligible AS MATERIALIZED (
+		SELECT %[1]s FROM %[2]s
+		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed') AND %[4]s IS NULL
+		  AND %[5]s < 5 AND %[6]s >= ?
+		UNION ALL
+		SELECT %[1]s FROM %[2]s
+		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed') AND %[4]s <= ?
+		  AND %[5]s < 5 AND %[6]s >= ?
+		UNION ALL
+		SELECT %[1]s FROM %[2]s
+		WHERE %[3]s IN ('sending','bot_sending') AND %[7]s <= ?
+		  AND %[5]s < 5 AND %[6]s >= ?
+	), candidates AS (
+		SELECT %[1]s FROM eligible ORDER BY %[1]s LIMIT ?
+	)
+	SELECT n.* FROM candidates c
+	CROSS JOIN LATERAL (SELECT * FROM %[2]s WHERE %[1]s = c.%[1]s LIMIT 1) n
+	ORDER BY c.%[1]s`, cols.Id, dao.Table(), cols.Status, cols.NextRetryAt, cols.Attempts, cols.CreatedAt, cols.LeaseUntil)
+}
+
+func loadAccountNoticeCandidates(ctx context.Context, now time.Time, limit int) ([]*entity.YoubanPublishAccountNotice, error) {
+	dao := pdao.YoubanPublishAccountNotice
+	cols := dao.Columns()
+	cutoff := now.AddDate(0, 0, -30)
+	var rows []*entity.YoubanPublishAccountNotice
+	if strings.EqualFold(dao.DB().GetConfig().Type, consts.DBPgsql) {
+		err := dao.DB().GetScan(ctx, &rows, accountNoticeCandidatesPostgresSQL(), cutoff, now, cutoff, now, cutoff, limit)
+		return rows, err
+	}
+	err := dao.Ctx(ctx).Where(accountNoticeDue(), now, now).WhereLT(cols.Attempts, 5).
+		WhereGTE(cols.CreatedAt, cutoff).OrderAsc(cols.Id).Limit(limit).Scan(&rows)
+	return rows, err
+}
+
 func (s *sSysPublish) runAccountNotices(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	cleanupTicker := time.NewTicker(time.Minute)
+	defer cleanupTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,16 +169,45 @@ func (s *sSysPublish) runAccountNotices(ctx context.Context) {
 			if err != nil && ctx.Err() == nil {
 				g.Log().Warningf(ctx, "处理账户通知失败 err:%+v", err)
 			}
+		case <-cleanupTicker.C:
+			call, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := pruneAccountNotices(call, time.Now())
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				g.Log().Warningf(ctx, "清理过期账户通知失败 err:%+v", err)
+			}
 		}
 	}
 }
+
+func pruneAccountNotices(ctx context.Context, now time.Time) error {
+	dao := pdao.YoubanPublishAccountNotice
+	cols := dao.Columns()
+	cutoff := now.AddDate(0, 0, -30)
+	const limit = 500
+	if strings.EqualFold(dao.DB().GetConfig().Type, consts.DBPgsql) {
+		query := fmt.Sprintf(`WITH expired AS (
+			SELECT %[1]s FROM %[2]s WHERE %[3]s < ?
+			ORDER BY %[3]s, %[1]s LIMIT ? FOR UPDATE SKIP LOCKED
+		)
+		DELETE FROM %[2]s n USING expired e WHERE n.%[1]s = e.%[1]s`, cols.Id, dao.Table(), cols.CreatedAt)
+		_, err := dao.DB().Exec(ctx, query, cutoff, limit)
+		return err
+	}
+	ids, err := dao.Ctx(ctx).WhereLT(cols.CreatedAt, cutoff).Fields(cols.Id).
+		OrderAsc(cols.CreatedAt).OrderAsc(cols.Id).Limit(limit).Array()
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	_, err = dao.Ctx(ctx).WhereLT(cols.CreatedAt, cutoff).WhereIn(cols.Id, ids).Delete()
+	return err
+}
+
 func (s *sSysPublish) processAccountNotices(ctx context.Context, now time.Time, limit int) error {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	cols := pdao.YoubanPublishAccountNotice.Columns()
-	var rows []*entity.YoubanPublishAccountNotice
-	err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(accountNoticeDue(), now, now).WhereLT(cols.Attempts, 5).WhereGTE(cols.CreatedAt, now.AddDate(0, 0, -30)).OrderAsc(cols.Id).Limit(limit).Scan(&rows)
+	rows, err := loadAccountNoticeCandidates(ctx, now, limit)
 	if err != nil {
 		return err
 	}
@@ -151,10 +222,6 @@ func (s *sSysPublish) processAccountNotices(ctx context.Context, now time.Time, 
 				firstError = err
 			}
 		}
-	}
-	// Terminal and abandoned notices have a finite retention window.
-	if _, err = pdao.YoubanPublishAccountNotice.Ctx(ctx).WhereLT(cols.CreatedAt, now.AddDate(0, 0, -30)).Delete(); err != nil {
-		return err
 	}
 	return firstError
 }
