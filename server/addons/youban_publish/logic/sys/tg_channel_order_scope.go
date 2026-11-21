@@ -132,8 +132,8 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 		return false, err
 	}
 	if !row.IsEmpty() {
-		if predecessor, ok := ctx.Value(telegramPredecessorKey{}).(*int64); ok {
-			*predecessor = row["id"].Int64()
+		if claim, ok := ctx.Value(telegramChannelClaimContextKey{}).(*telegramChannelClaimContext); ok && claim.jobID == job.Id {
+			claim.predecessorID = row["id"].Int64()
 		}
 		g.Log().Warning(ctx, "频道保留已开始资料的发送顺序", g.Map{
 			"event": "channel_queue_order_blocked", "jobId": job.Id, "channelId": job.ChannelId,

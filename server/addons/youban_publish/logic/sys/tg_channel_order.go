@@ -507,6 +507,12 @@ func (s *sSysPublish) postponeTelegramChannelJob(ctx context.Context, job telegr
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")
 	}
+	// The worker still owns the Redis processing receipt and will settle it
+	// back into the delayed lane. Re-arming here duplicates that enqueue and
+	// can race settlement. The durable idle job remains eligible for recovery.
+	if claim, ok := ctx.Value(telegramChannelClaimContextKey{}).(*telegramChannelClaimContext); ok && claim.jobID == job.Id {
+		return nil
+	}
 	return s.rearmTelegramJobOutbox(ctx, job.Id, retryDelay)
 }
 

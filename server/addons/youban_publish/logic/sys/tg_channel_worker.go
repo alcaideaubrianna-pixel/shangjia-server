@@ -183,8 +183,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	}
 	defer finishExecution()
 	stopRenew := keepTelegramChannelClaim(execution, cancel, claim)
-	var predecessor int64
-	ctx = context.WithValue(execution, telegramPredecessorKey{}, &predecessor)
+	claimContext := &telegramChannelClaimContext{jobID: jobID}
+	ctx = context.WithValue(execution, telegramChannelClaimContextKey{}, claimContext)
 	settled := false
 	terminal := false
 	releasePredecessor := false
@@ -386,7 +386,7 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			if enqueueErr := requeue(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
 				return true, gerror.Wrap(enqueueErr, "频道队列未完成任务重入队失败")
 			}
-			if predecessor > 0 && decision.BlockReason == telegramChannelBlockOrderWait {
+			if predecessor := claimContext.predecessorID; predecessor > 0 && decision.BlockReason == telegramChannelBlockOrderWait {
 				wakeCtx, cancelWake := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 				wakeErr := registerTelegramPredecessorWake(wakeCtx, predecessor, channelID, jobID, priority, requeueScore)
 				cancelWake()

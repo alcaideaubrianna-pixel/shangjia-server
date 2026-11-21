@@ -291,6 +291,27 @@ func TestTelegramCanceledOrderFinalizePostgres(t *testing.T) {
 	}
 }
 
+func TestTelegramRedisClaimOrderDeferralPreservesDeliveredOutboxPostgres(t *testing.T) {
+	db := telegramMembershipLocalDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, "UPDATE "+publishTgOutboxTable+" SET status='delivered' WHERE id=101"); err != nil {
+		t.Fatal(err)
+	}
+	claimed := context.WithValue(ctx, telegramChannelClaimContextKey{}, &telegramChannelClaimContext{jobID: 101})
+	if err := new(sSysPublish).postponeTelegramJobForChannelOrder(claimed, telegramJobRecord{Id: 101}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := db.GetOne(ctx, "SELECT dispatch_status,next_retry_at,last_dispatch_error FROM "+publishTgJobTable+" WHERE id=101")
+	if err != nil || job["dispatch_status"].String() != "idle" || job["next_retry_at"].IsNil() ||
+		job["last_dispatch_error"].String() != "等待同频道前序推送任务完成" {
+		t.Fatalf("deferral not persisted: %v %v", job, err)
+	}
+	status, err := db.GetValue(ctx, "SELECT status FROM "+publishTgOutboxTable+" WHERE id=101")
+	if err != nil || status.String() != "delivered" {
+		t.Fatalf("Redis deferral rearmed Outbox: %v %v", status, err)
+	}
+}
+
 func TestTelegramMembershipFailureCASPostgres(t *testing.T) {
 	db := telegramMembershipLocalDB(t)
 	ctx := context.Background()

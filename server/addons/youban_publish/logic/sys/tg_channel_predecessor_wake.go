@@ -10,7 +10,12 @@ import (
 	"hotgo/utility/telegrambudget"
 )
 
-type telegramPredecessorKey struct{}
+type telegramChannelClaimContextKey struct{}
+
+type telegramChannelClaimContext struct {
+	jobID         int64
+	predecessorID int64
+}
 
 func telegramPredecessorWakeKeys(id int64) (string, string) {
 	key := fmt.Sprintf("%s:predecessor:%d", telegramChannelActiveSetKey, id)
