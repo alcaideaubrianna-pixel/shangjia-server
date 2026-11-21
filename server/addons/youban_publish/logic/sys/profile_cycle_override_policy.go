@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"hotgo/internal/consts"
 	"hotgo/internal/library/cache"
 )
 
@@ -232,11 +233,15 @@ func (s *sSysPublish) rebuildProfileCycleMappings(ctx context.Context, fallback 
 	plansByID := make(map[int64]profileCycleProjection, len(rows))
 	var applied gdb.Result
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		shareLock := gdb.LockInShareMode
+		if strings.EqualFold(tx.GetDB().GetConfig().Type, consts.DBPgsql) {
+			shareLock = gdb.LockForShare
+		}
 		var policies []profileCycleOverridePolicy
 		if err := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
 			Fields("tenant_id,account_id,profile_id,cycle_override_enabled,cycle_override_days,cycle_override_version").
 			WhereIn("profile_id", profileIDs).WhereIn("tenant_id", tenantIDs).WhereIn("account_id", accountIDs).
-			WhereNull("deleted_at").OrderAsc("profile_id").LockShared().Scan(&policies); err != nil {
+			WhereNull("deleted_at").OrderAsc("profile_id").Lock(shareLock).Scan(&policies); err != nil {
 			return err
 		}
 		policyByScope := make(map[[3]int64]profileCycleOverridePolicy, len(policies))
@@ -246,7 +251,7 @@ func (s *sSysPublish) rebuildProfileCycleMappings(ctx context.Context, fallback 
 		var configs []profileCycleChannelConfig
 		if err := tx.Model(publishChannelTable).Safe().Ctx(ctx).
 			Fields("id,tenant_id,cycle_publish_enabled,cycle_publish_mode,cycle_publish_days,cycle_publish_time,status,publish_direction,cycle_config_version").
-			WhereIn("id", channelIDs).WhereIn("tenant_id", tenantIDs).WhereNull("deleted_at").OrderAsc("id").LockShared().Scan(&configs); err != nil {
+			WhereIn("id", channelIDs).WhereIn("tenant_id", tenantIDs).WhereNull("deleted_at").OrderAsc("id").Lock(shareLock).Scan(&configs); err != nil {
 			return err
 		}
 		configByID := make(map[int64]profileCycleChannelConfig, len(configs))

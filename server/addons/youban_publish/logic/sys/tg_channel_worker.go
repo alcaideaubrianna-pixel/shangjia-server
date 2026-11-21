@@ -152,6 +152,9 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	dequeueStartedAt := time.Now()
 	claim, err := claimTelegramChannelJob(ctx, channelID)
 	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			return true, nil
+		}
 		g.Log().Warning(ctx, "频道队列取头失败", g.Map{"event": "channel_queue_error", "stage": "dequeue", "channelId": channelID, "error": err.Error()})
 		return false, err
 	}
@@ -229,6 +232,15 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	job, loadErr := s.telegramJobById(loadCtx, jobID)
 	cancelLoad()
 	if loadErr != nil {
+		if isTelegramMissingJobError(loadErr) {
+			// The primary read confirmed the job is gone before any send.
+			// The deferred token-checked settlement removes only this claim.
+			terminal = true
+			g.Log().Info(ctx, "频道清理不存在的遗留任务", g.Map{
+				"event": "channel_queue_missing_job", "channelId": channelID, "jobId": jobID,
+			})
+			return true, nil
+		}
 		g.Log().Warning(ctx, "频道队列任务加载失败", g.Map{"event": "channel_queue_error", "stage": "load", "channelId": channelID, "jobId": jobID, "error": loadErr.Error()})
 		if enqueueErr := requeue(ctx, channelID, jobID, tgJobPriorityDefault, time.Now().Add(5*time.Second)); enqueueErr != nil {
 			return true, errors.Join(loadErr, enqueueErr)

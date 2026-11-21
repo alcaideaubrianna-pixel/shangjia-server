@@ -62,6 +62,7 @@ func testAccountCycleLocalPostgres(t *testing.T, runRepairs bool) {
 			"CREATE TABLE " + publishTgJobTable + "(id bigint,tenant_id bigint,account_id bigint,channel_id bigint,profile_id bigint,status text,sent_at timestamp,cycle_days int default 3,cycle_publish_time text default '',cycle_failure_count int default 0,operation_no text default '',profile_cycle_version bigint default 0,cycle_enabled int default 0,next_cycle_at timestamp)",
 			"CREATE TABLE " + publishChannelTable + "(id bigint,tenant_id bigint,status int,cycle_publish_enabled int,cycle_publish_mode text,publish_direction text,deleted_at timestamp,cycle_config_version bigint,cycle_publish_days int default 3,cycle_publish_time text default '')",
 			"CREATE TABLE " + publishProfileStateTable + "(tenant_id bigint,account_id bigint,profile_id bigint,cycle_override_enabled boolean default false,cycle_override_days int default 0,cycle_override_version bigint default 0,deleted_at timestamp)",
+			"CREATE TABLE hg_youban_publish_tenant_vip(id bigint, tenant_id bigint, level integer, status integer, opened_at timestamp, expired_at timestamp, remark text, created_at timestamp, updated_at timestamp, deleted_at timestamp)",
 			"CREATE TABLE hg_content_profile(id bigint,status int,visibility text,deleted_at timestamp)",
 			"CREATE TABLE " + channelPermissionCircuitTable + "(tenant_id bigint,channel_id bigint,paused int)",
 			"CREATE TABLE " + publishProfileCycleRunTable + "(id bigint,tenant_id bigint,account_id bigint,profile_id bigint,status text)",
