@@ -278,3 +278,25 @@ func TestCollectSourceRuntimeCancelledWorkCannotBecomeAck(t *testing.T) {
 		t.Fatalf("cancelled job reported success: work=%v lease=%v", workErr, leaseErr)
 	}
 }
+
+func TestCollectRetryReasonClassifiesBoundedDependencyReasons(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "media claim", err: newCollectMediaRetryError("相同Telegram媒体正在由其他Worker处理，等待复用结果", time.Second), want: "media_claim_wait"},
+		{name: "media cache", err: newCollectMediaRetryError("验证媒体缓存中", time.Second), want: "media_cache_pending"},
+		{name: "media download", err: newCollectMediaRetryError("账号采集媒体下载临时失败，等待重试", time.Second), want: "media_download_retry"},
+		{name: "verify pair", err: newCollectProcessRetryError(time.Second, "等待验证视频匹配并写入，禁止无验证入库"), want: "verify_pair_wait"},
+		{name: "window", err: newCollectProcessRetryError(time.Second, "配对区间已变化，清理回看游标后从头重查"), want: "material_window_wait"},
+		{name: "generic dependency", err: newCollectProcessRetryError(time.Second, "媒体待就绪"), want: "media_cache_pending"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collectRetryReason(test.err); got != test.want {
+				t.Fatalf("retry reason = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
