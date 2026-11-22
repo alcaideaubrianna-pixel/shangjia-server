@@ -239,6 +239,7 @@ func executeCollectSourceRuntimeClaimWithHandler(ctx context.Context, queue coll
 		err = queue.Nack(settleCtx, claim, delay)
 		fields["outcome"] = "retry"
 		fields["waitReason"] = reason
+		fields["retryReason"] = collectRetryReason(workErr)
 		fields["delayMs"] = delay.Milliseconds()
 		fields["error"] = workErr.Error()
 	} else {
@@ -270,10 +271,45 @@ func collectSourceRuntimeRetry(err error) (time.Duration, string) {
 	if errors.As(err, &retry) {
 		return max(collectProcessMinimumDelay, retry.delay), "job_dependency_wait"
 	}
+	var mediaRetry *collectMediaRetryError
+	if errors.As(err, &mediaRetry) {
+		return max(collectProcessMinimumDelay, mediaRetry.delay), "processing_error"
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return collectProcessRedisRetryDelay, "execution_cancelled"
 	}
 	return collectProcessRedisRetryDelay, "processing_error"
+}
+
+func collectRetryReason(err error) string {
+	if err == nil {
+		return "none"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "相同Telegram媒体正在由其他Worker处理"),
+		strings.Contains(message, "获取采集事件媒体锁失败"):
+		return "media_claim_wait"
+	case strings.Contains(message, "媒体缓存中"),
+		strings.Contains(message, "验证媒体缓存中"),
+		strings.Contains(message, "媒体待就绪"):
+		return "media_cache_pending"
+	case strings.Contains(message, "媒体下载触发限流"),
+		strings.Contains(message, "媒体下载临时失败"),
+		strings.Contains(message, "媒体下载临时中断"):
+		return "media_download_retry"
+	case strings.Contains(message, "等待验证视频匹配"),
+		strings.Contains(message, "验证资料未匹配到前序资料组"):
+		return "verify_pair_wait"
+	case strings.Contains(message, "配对区间已变化"),
+		strings.Contains(message, "来源批次已合并"),
+		strings.Contains(message, "采集批次有新消息"):
+		return "material_window_wait"
+	case strings.Contains(message, "等待来源Outbox后续调度"):
+		return "outbox_wait"
+	default:
+		return "job_dependency_wait"
+	}
 }
 
 // The notification remains leased until this bounded scoped dispatch pass is
