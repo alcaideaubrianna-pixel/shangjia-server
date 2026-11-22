@@ -754,6 +754,7 @@ ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatch_status
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatched_at" timestamp DEFAULT NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "dispatch_count" integer NOT NULL DEFAULT 0;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_failure_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "order_blocked_at" timestamp NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "last_dispatch_error" varchar(512) NOT NULL DEFAULT '';
 UPDATE "hg_youban_publish_tg_job" SET "tenant_id" = "merchant_id" WHERE "tenant_id" = 0 AND "merchant_id" > 0;
 DROP INDEX IF EXISTS "uk_ybp_tg_job_task_channel";

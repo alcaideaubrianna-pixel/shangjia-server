@@ -1,5 +1,8 @@
 -- Run outside a transaction: CONCURRENTLY keeps publishing writes available.
 -- Matches telegramPendingRecoveryPostgresSQL eligibility and DISTINCT ON order.
+ALTER TABLE hg_youban_publish_tg_job
+    ADD COLUMN IF NOT EXISTS order_blocked_at timestamp NULL;
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_pending_recovery_head
 ON hg_youban_publish_tg_job (
     tenant_id, account_id, channel_id,
@@ -33,8 +36,8 @@ WHERE COALESCE(status,'') NOT IN ('sent','failed','superseded','cancelled','dele
 -- cursor on updated_at/id and only considers jobs explicitly blocked by the
 -- channel-order wait reason. It is intentionally separate from the channel
 -- head index above because updated_at must be an index key for range scans.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_pending_head_timeout
-ON hg_youban_publish_tg_job (updated_at, id)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_pending_order_timeout
+ON hg_youban_publish_tg_job (order_blocked_at, id)
 INCLUDE (
     tenant_id,
     account_id,
@@ -42,12 +45,14 @@ INCLUDE (
     channel_id,
     target_chat_id,
     operation_no,
-    next_retry_at
+    next_retry_at,
+    last_dispatch_error
 )
 WHERE status = 'pending'
   AND COALESCE(dispatch_status,'') IN ('','idle')
   AND COALESCE(asynq_task_id,'')=''
   AND COALESCE(send_phase,'')=''
+  AND order_blocked_at IS NOT NULL
   AND last_dispatch_error = '等待同频道前序推送任务完成';
 
 -- IF NOT EXISTS does not repair an invalid index left by interrupted creation.

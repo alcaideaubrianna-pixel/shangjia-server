@@ -421,6 +421,9 @@ func telegramJobTransitionUpdate(in telegramJobTransition) ([]JobStatus, g.Map, 
 	sort.Slice(from, func(i, j int) bool { return from[i] < from[j] })
 	now := gtime.Now()
 	data := telegramJobStateUpdateData(strings.TrimSpace(in.To.String()), in.RetryDelay, now)
+	if in.To != telegramJobStatusPending {
+		data["order_blocked_at"] = nil
+	}
 	if in.ErrorMessage != "" || in.To == telegramJobStatusSent {
 		data["error_message"] = strings.TrimSpace(in.ErrorMessage)
 	}

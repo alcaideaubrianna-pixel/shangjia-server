@@ -487,22 +487,31 @@ func (s *sSysPublish) postponeTelegramJobForChannelOrder(ctx context.Context, jo
 func (s *sSysPublish) postponeTelegramChannelJob(ctx context.Context, job telegramJobRecord, retryDelay time.Duration, reason string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	nextRetryAt := gtime.Now().Add(retryDelay)
+	now := gtime.Now()
+	nextRetryAt := now.Add(retryDelay)
+	data := g.Map{
+		"dispatch_status":     tgDispatchStatusIdle,
+		"asynq_task_id":       "",
+		"task_id":             nil,
+		"next_retry_at":       nextRetryAt,
+		"last_dispatch_error": reason,
+		"updated_at":          now,
+	}
+	if reason == telegramPendingHeadWaitReason {
+		if _, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("status", []string{"pending", "failed_retry"}).
+			WhereNull("order_blocked_at").
+			Data(g.Map{"order_blocked_at": now}).Update(); err != nil {
+			return gerror.Wrap(err, "记录TG频道顺序等待开始时间失败")
+		}
+	} else {
+		data["order_blocked_at"] = nil
+	}
 	_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("id", job.Id).
 		WhereIn("status", []string{"pending", "failed_retry"}).
-		Data(g.Map{
-			"dispatch_status": tgDispatchStatusIdle,
-			// 顺序延期意味着本次 Asynq 执行已经结束；清除旧任务引用，允许恢复通知创建新的执行任务。
-			"asynq_task_id": "",
-			// task_id 是 PostgreSQL BIGINT。普通资料推送没有协议任务 ID，
-			// 必须写 NULL，不能写空字符串，否则会触发
-			// invalid input syntax for type bigint 并让频道队首反复重试。
-			"task_id":             nil,
-			"next_retry_at":       nextRetryAt,
-			"last_dispatch_error": reason,
-			"updated_at":          gtime.Now(),
-		}).
+		Data(data).
 		Update()
 	if err != nil {
 		return gerror.Wrap(err, "延后TG频道顺序任务失败")

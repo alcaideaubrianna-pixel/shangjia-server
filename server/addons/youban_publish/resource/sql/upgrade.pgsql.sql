@@ -1418,6 +1418,7 @@ DROP INDEX IF EXISTS "uk_ybp_collect_source_single_rule";
 ALTER TABLE "hg_youban_publish_account" ADD COLUMN IF NOT EXISTS "last_active_at" timestamp DEFAULT NULL;
 UPDATE "hg_youban_publish_account" SET "last_active_at" = NOW() WHERE "last_active_at" IS NULL;
 ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "cycle_failure_count" integer NOT NULL DEFAULT 0;
+ALTER TABLE "hg_youban_publish_tg_job" ADD COLUMN IF NOT EXISTS "order_blocked_at" timestamp NULL;
 CREATE TABLE IF NOT EXISTS "hg_youban_publish_daily_report" (
   "id" BIGSERIAL PRIMARY KEY,
   "tenant_id" bigint NOT NULL,

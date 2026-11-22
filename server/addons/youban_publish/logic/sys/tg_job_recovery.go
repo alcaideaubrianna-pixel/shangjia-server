@@ -1193,8 +1193,8 @@ func (s *sSysPublish) failTimedOutPendingTelegramHeads(ctx context.Context, limi
 		if job.Id <= 0 {
 			continue
 		}
-		if job.UpdatedAt != nil {
-			cursorUpdatedAt = job.UpdatedAt.Time
+		if job.OrderBlockedAt != nil {
+			cursorUpdatedAt = job.OrderBlockedAt.Time
 		}
 		cursorID = job.Id
 
@@ -1290,7 +1290,7 @@ func closeFailedTelegramJobOutbox(ctx context.Context, jobID int64, reason strin
 func telegramPendingHeadTimeoutPostgresSQL() string {
 	return `SELECT j.id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.target_chat_id,
 		j.operation_no,j.status,j.dispatch_status,j.send_phase,j.asynq_task_id,j.priority,
-		j.queue_name,j.last_dispatch_error,j.next_retry_at,j.updated_at,j.created_at
+		j.queue_name,j.last_dispatch_error,j.next_retry_at,j.order_blocked_at,j.updated_at,j.created_at
 	FROM ` + publishTgJobTable + ` j
 	WHERE j.status='pending'
 		AND COALESCE(j.dispatch_status,'') IN ('','idle')
@@ -1298,9 +1298,9 @@ func telegramPendingHeadTimeoutPostgresSQL() string {
 		AND COALESCE(j.send_phase,'')=''
 		AND j.last_dispatch_error=?
 		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
-		AND j.updated_at<=?
-		AND (j.updated_at>? OR (j.updated_at=? AND j.id>?))
-	ORDER BY j.updated_at,j.id
+		AND j.order_blocked_at<=?
+		AND (j.order_blocked_at>? OR (j.order_blocked_at=? AND j.id>?))
+	ORDER BY j.order_blocked_at,j.id
 	LIMIT ?`
 }
 
