@@ -27,7 +27,7 @@ func TestProfileMediaPermanentValidation(t *testing.T) {
 		expectedVerify            int
 		writing, ready, permanent bool
 	}{
-		{"ready single display", profileMediaReadinessCounts{Display: 1, Verify: 1}, 1, false, false, true},
+		{"ready single display", profileMediaReadinessCounts{Display: 1, Verify: 1}, 1, false, true, false},
 		{"zero display", profileMediaReadinessCounts{}, 0, false, false, true},
 		{"single pending metadata cannot grow display", profileMediaReadinessCounts{Display: 1, Pending: 1}, 0, false, false, true},
 		{"declared verification missing", profileMediaReadinessCounts{Display: 2}, 1, false, false, true},
@@ -113,15 +113,15 @@ func TestProfileMediaValidationLocalPostgres(t *testing.T) {
 		if err != nil || !ready {
 			t.Fatalf("uploaded media blocked: ready=%v err=%v", ready, err)
 		}
-		if _, err = tx.Exec(`DELETE FROM hg_youban_publish_media WHERE id=2`); err != nil {
+		if _, err = tx.Exec(`DELETE FROM hg_youban_publish_media WHERE id IN (1,2)`); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(`UPDATE hg_youban_publish_profile_state SET publish_task_status='waiting_media',publish_operation_no='profile:1',publish_task_updated_at=?`, time.Now().In(dbtime.Location())); err != nil {
 			return err
 		}
 		ready, err = s.profileMediaReady(ctx, 1)
-		if ready || !errors.Is(err, errProfileMediaValidation) || (!strings.Contains(err.Error(), "实际 1 个") || !strings.Contains(err.Error(), "要求大于 1 个")) {
-			t.Fatalf("single display: %v %v", ready, err)
+		if ready || !errors.Is(err, errProfileMediaValidation) || (!strings.Contains(err.Error(), "实际 0 个") || !strings.Contains(err.Error(), "要求至少 1 个")) {
+			t.Fatalf("zero display: %v %v", ready, err)
 		}
 		v, err := tx.GetValue(`SELECT publish_task_status FROM hg_youban_publish_profile_state`)
 		if err != nil {

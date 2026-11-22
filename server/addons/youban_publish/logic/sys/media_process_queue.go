@@ -326,7 +326,7 @@ func (s *sSysPublish) profileMediaReady(ctx context.Context, profileId int64) (b
 	// 数量齐全时不额外查询异步操作，正常路径只需两次 SQL。
 	expectedDisplay, expectedVerify := state["expected_display_media_count"].Int(), state["expected_verify_media_count"].Int()
 	writing := false
-	if counts.Display <= 1 || (expectedVerify > 0 && counts.Verify < 1) {
+	if counts.Display < 1 || (expectedVerify > 0 && counts.Verify < 1) {
 		op, opErr := g.DB().Model(profileMediaOperationTable).Safe().Ctx(ctx).
 			Fields("retry_count,created_at").Where("tenant_id", state["tenant_id"].Int64()).
 			Where("account_id", state["account_id"].Int64()).
@@ -363,8 +363,8 @@ func validateProfileMediaReadiness(counts profileMediaReadinessCounts, expectedV
 	if writing {
 		return false, nil
 	}
-	if counts.Display <= 1 {
-		return false, gerror.Wrapf(errProfileMediaValidation, "展示媒体实际 %d 个，要求大于 1 个", counts.Display)
+	if counts.Display < 1 {
+		return false, gerror.Wrapf(errProfileMediaValidation, "展示媒体实际 %d 个，要求至少 1 个", counts.Display)
 	}
 	if expectedVerify > 0 && counts.Verify < 1 {
 		return false, gerror.Wrapf(errProfileMediaValidation, "验证媒体实际 %d 个，已声明验证资料，要求至少 1 个", counts.Verify)
