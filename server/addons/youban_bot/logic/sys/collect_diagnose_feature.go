@@ -58,7 +58,7 @@ func (f collectSourceDiagnoseFeature) Handle(ctx context.Context, bot *sSysBot, 
 type collectEventDiagnoseFeature struct{}
 
 func (collectEventDiagnoseFeature) Key() string         { return collectEventDiagnoseFeatureKey }
-func (collectEventDiagnoseFeature) Command() string     { return "collect" }
+func (collectEventDiagnoseFeature) Command() string     { return "collect-diagnose" }
 func (collectEventDiagnoseFeature) Description() string { return "查询Telegram采集链路" }
 func (collectEventDiagnoseFeature) Priority() int       { return 204 }
 func (collectEventDiagnoseFeature) Menus(context.Context, gatewayservice.BotContext) (gatewayservice.FeatureMenus, error) {
@@ -75,7 +75,7 @@ func (f collectEventDiagnoseFeature) Handle(ctx context.Context, bot *sSysBot, f
 	}
 	ref, err := parseCollectDiagnoseURL(fc.Args)
 	if err != nil {
-		return true, bot.reply(ctx, fc.BotId, fmt.Sprint(fc.Msg.Chat.ID), "用法：/collect https://t.me/channel/123456")
+		return true, bot.reply(ctx, fc.BotId, fmt.Sprint(fc.Msg.Chat.ID), "用法：/collect-diagnose https://t.me/channel/123456")
 	}
 	text, err := diagnoseCollectBranches(ctx, ref)
 	if err != nil {
