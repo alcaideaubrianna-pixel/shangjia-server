@@ -23,15 +23,6 @@ type dueBatchCycleChannel struct {
 	RoundEndID      int64  `orm:"cycle_round_end_id"`
 }
 
-func (s *sSysPublish) scheduleDueChannelBatchCycles(ctx context.Context, limit int) error {
-	for shard := 0; shard < profileCycleShardCount; shard++ {
-		if err := s.scheduleDueChannelBatchCyclesShard(ctx, limit, shard); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // scheduleDueChannelBatchCyclesShard 按账户扫描到期批次配置，复用会员权限和既有批次游标能力。
 func (s *sSysPublish) scheduleDueChannelBatchCyclesShard(ctx context.Context, limit, shard int, scopes ...publishAccountScope) error {
 	now := gtime.Now()

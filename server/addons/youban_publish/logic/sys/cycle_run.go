@@ -81,7 +81,6 @@ func (s *sSysPublish) RunChannelCycleScheduler(ctx context.Context) error {
 	return runChannelCycleSchedulerStages(ctx, []channelCycleSchedulerStage{
 		// 到期循环是用户可见的主路径，必须先进入分片扫描；恢复和通知阶段
 		// 可能访问大量历史数据，不能阻塞新一轮循环调度。
-		{name: "扫描批次循环", run: func(ctx context.Context) error { return s.scheduleDueChannelBatchCycles(ctx, 50) }},
 		{name: "扫描时间循环", run: s.runProfileCycleDueScan},
 		{name: "暂停长期未活跃免费循环", run: func(ctx context.Context) error { return s.pauseInactiveFreeChannelCycles(ctx) }},
 		{name: "恢复循环批次", run: func(ctx context.Context) error { return s.recoverChannelCycleRuns(ctx) }},

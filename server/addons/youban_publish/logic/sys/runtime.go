@@ -119,6 +119,11 @@ func (s *sSysPublish) runPublishRuntime(ctx context.Context) {
 	if config.BackgroundQueue {
 		s.startTelegramBackgroundWorker(ctx)
 	}
+	// Scheduler owns the unified-stream account schedule consumer. Background
+	// starts the same consumer for the all-in-one role; avoid starting it twice.
+	if config.Scheduler && !config.BackgroundWorker {
+		go s.runAccountScheduleRedis(ctx)
+	}
 	// 资料指纹回填是低优先级维护任务，只允许 Background 角色运行，不能和 Publish 调度/发送共用实例。
 	if config.BackgroundWorker {
 		go s.runProfileFingerprintBackfill(ctx)

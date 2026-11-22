@@ -52,7 +52,7 @@ func (s *sSysPublish) handleAccountScheduleTask(ctx context.Context, task *asynq
 	return s.markAccountSchedule(ctx, scope, false)
 }
 
-// runAccountScheduleRedis 仅Background启动；实例间由Redis token及现有ownedlease串行化。
+// runAccountScheduleRedis 由Scheduler或Background角色启动；实例间由Redis token及现有ownedlease串行化。
 // 固定worker数，每账户25秒预算，45秒claim租约，不受旧Asynq积压影响。
 func (s *sSysPublish) runAccountScheduleRedis(ctx context.Context) {
 	n := g.Cfg().MustGet(ctx, "youbanPublish.queue.accountScheduleConcurrency", 4).Int()
