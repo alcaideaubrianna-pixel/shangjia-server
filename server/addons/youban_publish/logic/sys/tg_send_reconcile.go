@@ -8,6 +8,7 @@ import (
 	relayconsts "hotgo/addons/youban_publish/consts"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	"hotgo/addons/youban_publish/model"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -328,6 +329,22 @@ const (
 	telegramUnknownAttemptRetry     = "retry"
 )
 
+const (
+	telegramUnknownMaxRetriesEnv     = "YOUBAN_PUBLISH_TG_UNKNOWN_MAX_RETRIES"
+	telegramUnknownMaxRetriesDefault = 3
+)
+
+func telegramUnknownMaxRetries() int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(telegramUnknownMaxRetriesEnv)))
+	if err != nil || value <= 0 {
+		return telegramUnknownMaxRetriesDefault
+	}
+	if value > 10 {
+		return 10
+	}
+	return value
+}
+
 func telegramUnknownAttemptRecoveryAction(attempt telegramDeliveryAttempt, auditCount int) string {
 	if attempt.Id <= 0 {
 		return telegramUnknownAttemptRetry
@@ -398,6 +415,16 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 		return false, err
 	}
 	setPublishReconcileObservation(ctx, "unknown", &attempt)
+	if job.ReconcileCount >= telegramUnknownMaxRetries() &&
+		auditCount == 0 &&
+		attempt.ResponseReceived == 0 &&
+		attempt.Id > 0 &&
+		strings.TrimSpace(attempt.ErrorMessage) != "" {
+		return true, s.failUnknownTelegramJobAfterRetries(ctx, job, fmt.Sprintf(
+			"Telegram发送结果连续%d次无法确认，且没有远端消息证据，已释放频道顺序并延后任务",
+			telegramUnknownMaxRetries(),
+		))
+	}
 	switch telegramUnknownAttemptRecoveryAction(attempt, auditCount) {
 	case telegramUnknownAttemptReconcile:
 		if err = s.parkTelegramUnknownForWebhook(ctx, job, attempt); err != nil {
@@ -408,6 +435,13 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 		return true, nil
 
 	case telegramUnknownAttemptRetry:
+		maxRetries := telegramUnknownMaxRetries()
+		if job.ReconcileCount >= maxRetries {
+			return true, s.failUnknownTelegramJobAfterRetries(ctx, job, fmt.Sprintf(
+				"Telegram发送结果连续%d次无法确认，且没有远端消息证据，已释放频道顺序并延后任务",
+				maxRetries,
+			))
+		}
 		var phase SendPhase = telegramSendPhaseCleanupConfirmed
 		if attempt.Phase == "package" || job.SendPhase == relayconsts.RelaySendPhaseSending {
 			phase = relayconsts.RelaySendPhaseReady
@@ -432,8 +466,12 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 		}
 		transitioned, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
 			JobId: job.Id, From: []JobStatus{telegramJobStatusConfirming}, To: telegramJobStatusRetryWait,
-			SendPhase:  jobPhase(phase),
-			Additional: g.Map{"error_message": "", "last_dispatch_error": ""},
+			SendPhase: jobPhase(phase),
+			Additional: g.Map{
+				"error_message":       "",
+				"last_dispatch_error": "",
+				"reconcile_count":     job.ReconcileCount + 1,
+			},
 		})
 		if transitionErr != nil {
 			return true, transitionErr
@@ -451,6 +489,40 @@ func (s *sSysPublish) recoverUnconfirmedUnknownTelegramJob(ctx context.Context, 
 	default:
 		return false, nil
 	}
+}
+
+func (s *sSysPublish) failUnknownTelegramJobAfterRetries(ctx context.Context, job telegramJobRecord, reason string) error {
+	transitioned, err := s.transitionTelegramJob(ctx, telegramJobTransition{
+		JobId:              job.Id,
+		From:               []JobStatus{telegramJobStatusConfirming, JobStatus("unknown")},
+		To:                 telegramJobStatusFailed,
+		ErrorMessage:       reason,
+		CleanupStartedSend: true,
+		Additional: g.Map{
+			"reconcile_count":     job.ReconcileCount,
+			"last_dispatch_error": reason,
+		},
+	})
+	if err != nil {
+		return gerror.Wrap(err, "收口超过未知结果重试上限的TG任务失败")
+	}
+	if !transitioned {
+		return nil
+	}
+	_ = closeFailedTelegramJobOutbox(ctx, job.Id, reason)
+	if _, err = s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo)); err != nil {
+		g.Log().Warningf(ctx, "收口未知结果超限后的资料状态失败 jobId:%d err:%+v", job.Id, err)
+	}
+	if telegramChannelQueueEnabled() && job.ChannelId > 0 {
+		if removeErr := removeTelegramChannelJob(ctx, job.ChannelId, job.Id); removeErr != nil {
+			g.Log().Warningf(ctx, "释放未知结果超限TG队首失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, removeErr)
+		}
+	}
+	s.appendTelegramJobLog(ctx, job, "reconcile", "failed", reason)
+	if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+		g.Log().Warningf(ctx, "唤醒未知结果超限后的下一条TG任务失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+	}
+	return nil
 }
 
 func (s *sSysPublish) reconcileIncompleteUnknownTelegramAttempt(ctx context.Context, job telegramJobRecord, cause error) error {
@@ -502,11 +574,14 @@ func (s *sSysPublish) parkTelegramUnknownForWebhook(ctx context.Context, job tel
 			return err
 		}
 		transitioned, err := s.transitionTelegramJobTx(ctx, tx, telegramJobTransition{
-			JobId:          job.Id,
-			From:           []JobStatus{JobStatusUnknown, telegramJobStatusSending, telegramJobStatusConfirming},
-			To:             telegramJobStatusConfirming,
-			ErrorMessage:   "等待Telegram Webhook确认",
-			Additional:     g.Map{"next_retry_at": deadline},
+			JobId:        job.Id,
+			From:         []JobStatus{JobStatusUnknown, telegramJobStatusSending, telegramJobStatusConfirming},
+			To:           telegramJobStatusConfirming,
+			ErrorMessage: "等待Telegram Webhook确认",
+			Additional: g.Map{
+				"next_retry_at":   deadline,
+				"reconcile_count": job.ReconcileCount + 1,
+			},
 			DispatchStatus: jobDispatch(DispatchStatusProcessing),
 		})
 		parked = transitioned && err == nil
