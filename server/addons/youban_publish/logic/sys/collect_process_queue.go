@@ -783,7 +783,20 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 			return 0, false, false, gerror.Wrap(readErr, "确认采集事件完成状态失败")
 		}
 		if !current.IsEmpty() && !collectProcessEventFinished(current) {
-			return 5 * time.Second, true, false, nil
+			g.Log().Info(ctx, "采集事件等待终态确认", g.Map{
+				"event":               "collect.process.pending",
+				"pendingReason":       "event_not_terminal",
+				"eventId":             payload.EventId,
+				"tenantId":            payload.TenantId,
+				"accountId":           payload.AccountId,
+				"sourceId":            payload.SourceId,
+				"queueLane":           collectSourceRuntimeLane(payload),
+				"delayMs":             (30 * time.Second).Milliseconds(),
+				"status":              current["status"].String(),
+				"materialRole":        current["material_role"].String(),
+				"materialGroupStatus": current["material_group_status"].String(),
+			})
+			return 30 * time.Second, true, false, nil
 		}
 		return 0, false, true, nil
 	}
@@ -792,7 +805,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		return 0, false, false, err
 	}
 	if !reserved {
-		g.Log().Debugf(ctx, "采集源任务命中跨节点节流，丢弃重复任务 sourceId:%d", payload.SourceId)
+		g.Log().Info(ctx, "采集源任务命中跨节点节流", g.Map{
+			"event":         "collect.process.pending",
+			"pendingReason": "source_throttle",
+			"eventId":       payload.EventId,
+			"tenantId":      payload.TenantId,
+			"accountId":     payload.AccountId,
+			"sourceId":      payload.SourceId,
+			"queueLane":     collectSourceRuntimeLane(payload),
+			"delayMs":       collectProcessMinimumDelay.Milliseconds(),
+		})
 		// Do not drop the task while leaving its schedule reservation alive.
 		// A short retry keeps the source self-healing under contention.
 		return collectProcessMinimumDelay, true, false, nil
@@ -802,6 +824,16 @@ func (s *sSysPublish) processCollectSourceTask(ctx context.Context, payload coll
 		return 0, false, false, err
 	}
 	if !executed {
+		g.Log().Info(ctx, "采集来源窗口未执行，等待下一次调度", g.Map{
+			"event":         "collect.process.pending",
+			"pendingReason": "window_not_executed",
+			"eventId":       payload.EventId,
+			"tenantId":      payload.TenantId,
+			"accountId":     payload.AccountId,
+			"sourceId":      payload.SourceId,
+			"queueLane":     collectSourceRuntimeLane(payload),
+			"delayMs":       collectProcessMinimumDelay.Milliseconds(),
+		})
 		return collectProcessMinimumDelay, true, false, nil
 	}
 	delay, pending, err = nextCollectProcessDelay(ctx, payload)
