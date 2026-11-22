@@ -29,6 +29,26 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 sudo systemctl enable --now docker'
 
+"${NODE_SSH[@]}" 'sudo python3 - <<"PY"
+import json, os, tempfile
+path = "/etc/docker/daemon.json"
+try:
+    with open(path) as f:
+        config = json.load(f)
+except Exception:
+    config = {}
+config["log-driver"] = "json-file"
+config["log-opts"] = {"max-size": "100m", "max-file": "3"}
+fd, temp = tempfile.mkstemp(dir="/etc/docker", prefix="daemon.json.")
+os.close(fd)
+with open(temp, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+os.chmod(temp, 0o644)
+os.replace(temp, path)
+PY
+sudo systemctl reload docker || true'
+
 "${NODE_SSH[@]}" "sudo docker swarm join --token '$join_args' '$manager_ip:2377'"
 node_name=$("${NODE_SSH[@]}" 'hostname')
 "${MANAGER_SSH[@]}" "sudo docker node update --label-add role='$ROLE' '$node_name' >/dev/null"
