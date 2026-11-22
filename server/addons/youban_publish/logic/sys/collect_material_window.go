@@ -26,11 +26,14 @@ const (
 	// Grouping starts immediately. The only waiting window is the twenty-minute
 	// verification window; a display message without a match is published when
 	// that window expires.
-	collectMaterialGroupingDelay           = 0
-	collectMaterialVerifyWindowDefault     = 20 * time.Minute
-	collectMaterialVerifySettleDelay       = time.Minute
-	collectMaterialVerifyRetryDelay        = time.Minute
-	collectMaterialWaitingVerifyRetryDelay = 10 * time.Second
+	collectMaterialGroupingDelay       = 0
+	collectMaterialVerifyWindowDefault = 20 * time.Minute
+	collectMaterialVerifySettleDelay   = time.Minute
+	collectMaterialVerifyRetryDelay    = time.Minute
+	// Verification pairing is event-driven by source scheduling. A longer fallback
+	// interval prevents hot sources from repeatedly rebuilding the same window
+	// while the verification media is still unavailable.
+	collectMaterialWaitingVerifyRetryDelay = 30 * time.Second
 	collectMaterialWindowExecutionTimeout  = 90 * time.Second
 	collectMaterialWindowMergeTTLDefault   = 3 * time.Second
 	collectMaterialCandidateRebuildTTL     = 5 * time.Second
