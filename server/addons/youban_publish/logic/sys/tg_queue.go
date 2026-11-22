@@ -1079,7 +1079,10 @@ func (s *sSysPublish) enqueueCycleRun(ctx context.Context, runId int64, delay ti
 			TenantID  int64 `orm:"tenant_id"`
 			AccountID int64 `orm:"account_id"`
 		}
-		if err := g.DB().Model(publishCycleRunTable+" r").Ctx(ctx).InnerJoin(publishChannelTable+" c", "c.id=r.channel_id").Where("r.id", runId).Fields("r.tenant_id,c.tg_account_id AS account_id").Scan(&owner); err != nil {
+		if err := g.DB().Model(publishCycleRunTable+" r").Ctx(ctx).
+			InnerJoin(publishChannelTable+" c", "c.id=r.channel_id AND c.tenant_id=r.tenant_id").
+			InnerJoin(publishTgAccountTable+" ta", "ta.id=c.tg_account_id AND ta.tenant_id=c.tenant_id AND ta.deleted_at IS NULL").
+			Where("r.id", runId).Fields("r.tenant_id,ta.account_id AS account_id").Scan(&owner); err != nil {
 			return err
 		}
 		newEngine = s.accountPushEngine(ctx, owner.TenantID, owner.AccountID) == pushEngineUnifiedStream

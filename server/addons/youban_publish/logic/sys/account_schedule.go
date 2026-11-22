@@ -100,7 +100,8 @@ func finishProfileCycleRun(ctx context.Context, runID int64) error {
 func cycleRunAccountModel(ctx context.Context, scopes []publishAccountScope) *gdb.Model {
 	model := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx)
 	if len(scopes) > 0 {
-		model = model.Where("tenant_id", scopes[0].TenantID).Where("EXISTS (SELECT 1 FROM "+publishChannelTable+" owner WHERE owner.id="+publishCycleRunTable+".channel_id AND owner.tg_account_id=?)", scopes[0].AccountID)
+		model = model.Where("tenant_id", scopes[0].TenantID).
+			Where("EXISTS (SELECT 1 FROM "+publishChannelTable+" owner JOIN "+publishTgAccountTable+" owner_tg ON owner_tg.id=owner.tg_account_id WHERE owner.id="+publishCycleRunTable+".channel_id AND owner_tg.tenant_id=owner.tenant_id AND owner_tg.account_id=? AND owner_tg.deleted_at IS NULL)", scopes[0].AccountID)
 	}
 	return model
 }
