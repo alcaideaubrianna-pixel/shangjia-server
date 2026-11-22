@@ -45,7 +45,7 @@ if command -v tccli >/dev/null 2>&1 && [[ "$node_ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]
     jq -er '(.Response // .).InstanceSet[0].InstanceId')
   tccli lighthouse CreateFirewallRules --region ap-singapore --InstanceId "$instance_id" \
     --FirewallRules '[
-      {"Protocol":"TCP","Port":"2377,7946,19100,18080","CidrBlock":"10.3.0.0/16","Action":"ACCEPT","FirewallRuleDescription":"Swarm and monitoring internal access"},
+      {"Protocol":"TCP","Port":"2377,7946,19100,18080,18081","CidrBlock":"10.3.0.0/16","Action":"ACCEPT","FirewallRuleDescription":"Swarm and monitoring internal access"},
       {"Protocol":"UDP","Port":"7946,4789","CidrBlock":"10.3.0.0/16","Action":"ACCEPT","FirewallRuleDescription":"Swarm overlay internal access"}
     ]' >/dev/null
 fi

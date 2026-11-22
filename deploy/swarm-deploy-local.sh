@@ -81,6 +81,7 @@ MANAGER_SSH_TARGET="${SWARM_MANAGER_SSH_TARGET:-ubuntu@43.160.212.235}"
 MANAGER_SSH_KEY="${SWARM_MANAGER_SSH_KEY:-/Users/ley/.ssh/id_hk_rsa}"
 IMAGE_REPOSITORY="${TENCENT_IMAGE_REPOSITORY:-sgccr.ccs.tencentyun.com/xiaohuiji-cc/xiaohuiji-package}"
 WEB_NODE_URL="${SWARM_WEB_NODE_URL:-http://43.160.221.143}"
+WEB_EXTERNAL_READY_URL="${SWARM_WEB_EXTERNAL_READY_URL:-https://api.xiaohuiji.cc/readyz}"
 ROLES=(publish collector scheduler background media web)
 if (( ${#ROLE_ARGS[@]} > 0 )); then ROLES=("${ROLE_ARGS[@]}"); fi
 
@@ -175,7 +176,9 @@ update_web_color() {
   remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
   logf '%s[web-%s] 已提交更新，等待 1/1 就绪%s\n' "$C_BLUE" "$color" "$C_RESET"
   wait_service "$service" 1
-  curl -fsS --max-time 8 "$WEB_NODE_URL/readyz" >/dev/null
+  if [[ -n "${SWARM_WEB_CANDIDATE_READY_URL:-}" ]]; then
+    curl -fsS --max-time 8 "${SWARM_WEB_CANDIDATE_READY_URL}/${color}/readyz" >/dev/null
+  fi
   logf '%s[web-%s] readyz 通过，耗时 %s 秒%s\n' "$C_GREEN" "$color" "$((SECONDS - role_started))" "$C_RESET"
 }
 
@@ -183,14 +186,23 @@ switch_router() {
   local color="$1" current_config next_config
   if [[ "$color" == blue ]]; then
     current_config=web-caddyfile-green
-    next_config=web-caddyfile-blue
+    next_config=web-caddyfile-blue-38080
   else
-    current_config=web-caddyfile-blue
+    current_config=web-caddyfile-blue-38080
     next_config=web-caddyfile-green
   fi
   remote "sudo docker service update --config-rm '$current_config' --config-add source='$next_config',target=/etc/caddy/Caddyfile xiaohuiji-web-router >/dev/null"
-  for _ in $(seq 1 20); do
-    if curl -fsS --max-time 5 "$WEB_NODE_URL/readyz" >/dev/null; then return 0; fi
+  for _ in $(seq 1 3); do
+    if curl -fsS --max-time 5 "$WEB_EXTERNAL_READY_URL" >/dev/null; then return 0; fi
+    sleep 1
+  done
+  logf '%s[web-%s] 公网 readyz 失败，自动回切%s\n' "$C_RED" "$color" "$C_RESET" >&2
+  remote "sudo docker service update --config-rm '$next_config' --config-add source='$current_config',target=/etc/caddy/Caddyfile xiaohuiji-web-router >/dev/null" || true
+  for _ in $(seq 1 5); do
+    if curl -fsS --max-time 5 "$WEB_EXTERNAL_READY_URL" >/dev/null; then
+      logf '%s[web-%s] 已回切原版本%s\n' "$C_YELLOW" "$color" "$C_RESET" >&2
+      break
+    fi
     sleep 1
   done
   return 1
