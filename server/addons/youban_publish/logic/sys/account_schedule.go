@@ -105,10 +105,19 @@ func cycleRunAccountModel(ctx context.Context, scopes []publishAccountScope) *gd
 	return model
 }
 
-// accountScheduleModel 将扫描限定到一个账户；旧全局扫描只保留未迁移账户。
+// accountScheduleModel 将扫描限定到一个业务账户。频道表保存的是
+// tg_account.id，调度 scope 保存的是 tg_account.account_id，必须通过
+// hg_youban_publish_tg_account 映射，不能直接比较两个不同语义的 ID。
 func accountScheduleModel(model *gdb.Model, tenantField, accountField string, scopes []publishAccountScope) *gdb.Model {
 	if len(scopes) > 0 {
-		return model.Where(tenantField, scopes[0].TenantID).Where(accountField, scopes[0].AccountID)
+		model = model.Where(tenantField, scopes[0].TenantID)
+		if strings.HasSuffix(accountField, ".tg_account_id") {
+			return model.Where("EXISTS (SELECT 1 FROM "+publishTgAccountTable+" schedule_tg_account WHERE schedule_tg_account.id="+accountField+" AND schedule_tg_account.tenant_id=? AND schedule_tg_account.account_id=? AND schedule_tg_account.deleted_at IS NULL)", scopes[0].TenantID, scopes[0].AccountID)
+		}
+		return model.Where(accountField, scopes[0].AccountID)
+	}
+	if strings.HasSuffix(accountField, ".tg_account_id") {
+		return model.Where("NOT EXISTS (SELECT 1 FROM " + publishTgAccountTable + " schedule_tg_account JOIN " + publishAccountSettingTable + " se ON se.tenant_id=schedule_tg_account.tenant_id AND se.account_id=schedule_tg_account.account_id AND se.deleted_at IS NULL WHERE schedule_tg_account.id=" + accountField + " AND schedule_tg_account.tenant_id=" + tenantField + " AND schedule_tg_account.deleted_at IS NULL AND se.push_engine='unified_stream')")
 	}
 	return model.Where("NOT EXISTS (SELECT 1 FROM " + publishAccountSettingTable + " se WHERE se.tenant_id=" + tenantField + " AND se.account_id=" + accountField + " AND se.deleted_at IS NULL AND se.push_engine='unified_stream')")
 }
