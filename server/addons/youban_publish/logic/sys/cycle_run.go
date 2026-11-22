@@ -24,15 +24,16 @@ import (
 )
 
 const (
-	cycleRunStatusPending     = "pending"
-	cycleRunStatusRunning     = "running"
-	cycleRunStatusDispatching = "dispatching"
-	cycleRunStatusFinished    = "finished"
-	cycleRunStatusPartial     = "partial_failed"
-	cycleRunStatusFailed      = "failed"
-	cycleRunStatusSkipped     = "skipped"
-	cycleBatchPageSize        = 200
-	cycleBatchBacklogLimit    = 1000
+	cycleRunStatusPending               = "pending"
+	cycleRunStatusRunning               = "running"
+	cycleRunStatusDispatching           = "dispatching"
+	cycleRunStatusFinished              = "finished"
+	cycleRunStatusPartial               = "partial_failed"
+	cycleRunStatusFailed                = "failed"
+	cycleRunStatusSkipped               = "skipped"
+	cycleBatchPageSize                  = 200
+	cycleBatchBacklogLimit              = 1000
+	cycleRunUnfinishedJobCandidateLimit = 200
 )
 
 type channelCycleRecord struct {
@@ -388,10 +389,6 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context, scopes ...pub
 		}
 	}
 
-	// A dispatching run is normally finalized by terminal-state polling. If it
-	// has been idle for too long and has no unfinished child jobs, release it
-	// as a partial failure. Never re-enqueue a run with pending/sending jobs,
-	// otherwise Telegram messages could be sent twice.
 	var staleDispatching []cycleRunRecord
 	if err := cycleRunAccountModel(ctx, scopes).
 		Fields("id,tenant_id,channel_id,upper_profile_id,scheduled_at,total_count,queued_count,cursor_id").
@@ -407,25 +404,7 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context, scopes ...pub
 			}
 			continue
 		}
-		active, err := s.cycleRunHasUnfinishedJobs(ctx, run.Id)
-		if err != nil {
-			return err
-		}
-		if active {
-			continue
-		}
-		if err = s.finalizeChannelCycleDelivery(ctx, run); err != nil {
-			return err
-		}
-		var current cycleRunRecord
-		if err = cycleRunAccountModel(ctx, scopes).
-			Fields("id,status").Where("id", run.Id).Scan(&current); err != nil {
-			return gerror.Wrap(err, "校验超时频道循环发送状态失败")
-		}
-		if current.Status != cycleRunStatusDispatching {
-			continue
-		}
-		if err = s.markStaleDispatchingCycleRun(ctx, run, now); err != nil {
+		if err := s.recoverStaleDispatchingCycleRun(ctx, run, now); err != nil {
 			return err
 		}
 	}
@@ -449,28 +428,194 @@ func (s *sSysPublish) recoverChannelCycleRuns(ctx context.Context, scopes ...pub
 }
 
 func (s *sSysPublish) cycleRunHasUnfinishedJobs(ctx context.Context, runId int64) (bool, error) {
-	count, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
-		WhereLike("operation_no", fmt.Sprintf("cycle_batch:%d:", runId)+"%").
-		WhereIn("status", []string{"pending", "sending", "failed_retry", "unknown"}).Count()
-	return count > 0, err
+	state, err := s.inspectCycleRunUnfinishedJobs(ctx, runId, gtime.Now())
+	if err != nil {
+		return false, err
+	}
+	return state.unsafeCount > 0 || len(state.safePendingIDs) > 0 || state.truncated, nil
+}
+
+type cycleRunUnfinishedJobRecord struct {
+	Id             int64       `orm:"id"`
+	Status         string      `orm:"status"`
+	DispatchStatus string      `orm:"dispatch_status"`
+	SendPhase      string      `orm:"send_phase"`
+	AsynqTaskId    string      `orm:"asynq_task_id"`
+	TgMessageId    int64       `orm:"tg_message_id"`
+	SentAt         *gtime.Time `orm:"sent_at"`
+	CreatedAt      *gtime.Time `orm:"created_at"`
+	HasAttempt     int         `orm:"has_attempt"`
+	HasMessage     int         `orm:"has_message"`
+}
+
+type cycleRunUnfinishedJobState struct {
+	safePendingIDs []int64
+	unsafeCount    int
+	truncated      bool
+}
+
+func (s *sSysPublish) inspectCycleRunUnfinishedJobs(ctx context.Context, runId int64, now *gtime.Time) (cycleRunUnfinishedJobState, error) {
+	var state cycleRunUnfinishedJobState
+	operationPrefix := fmt.Sprintf("cycle_batch:%d:", runId)
+	upperBound, ok := publishBatchOperationNoUpperBound(operationPrefix)
+	if !ok {
+		return state, gerror.New("循环批次任务前缀格式不合法")
+	}
+	var jobs []cycleRunUnfinishedJobRecord
+	err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields(`j.id,j.status,j.dispatch_status,j.send_phase,
+			COALESCE(j.asynq_task_id,'') AS asynq_task_id,
+			COALESCE(j.tg_message_id,0) AS tg_message_id,j.sent_at,j.created_at,
+			CASE WHEN EXISTS (SELECT 1 FROM `+publishTgAttemptTable+` a WHERE a.job_id=j.id) THEN 1 ELSE 0 END AS has_attempt,
+			CASE WHEN EXISTS (SELECT 1 FROM `+publishTgMessageTable+` m WHERE m.job_id=j.id) THEN 1 ELSE 0 END AS has_message`).
+		Where("j.operation_no >= ? AND j.operation_no < ?", operationPrefix, upperBound).
+		WhereIn("j.status", []string{telegramJobStatusPending, telegramJobStatusSending, telegramJobStatusRetryWait, telegramJobStatusConfirming}).
+		OrderAsc("j.id").Limit(cycleRunUnfinishedJobCandidateLimit + 1).Scan(&jobs)
+	if err != nil {
+		return state, gerror.Wrap(err, "读取循环批次未完成任务失败")
+	}
+	if len(jobs) > cycleRunUnfinishedJobCandidateLimit {
+		state.truncated = true
+		jobs = jobs[:cycleRunUnfinishedJobCandidateLimit]
+	}
+	cutoff := now.Add(-time.Duration(cycleHeadTimeoutMinutes()) * time.Minute)
+	for _, job := range jobs {
+		if cycleRunPendingJobSafe(job, cutoff) {
+			state.safePendingIDs = append(state.safePendingIDs, job.Id)
+			continue
+		}
+		state.unsafeCount++
+	}
+	return state, nil
+}
+
+func cycleRunPendingJobSafe(job cycleRunUnfinishedJobRecord, cutoff *gtime.Time) bool {
+	return job.Status == telegramJobStatusPending &&
+		(job.DispatchStatus == "" || job.DispatchStatus == tgDispatchStatusIdle) &&
+		job.SendPhase == "" &&
+		job.AsynqTaskId == "" &&
+		job.TgMessageId == 0 &&
+		job.SentAt == nil &&
+		job.HasAttempt == 0 &&
+		job.HasMessage == 0 &&
+		job.CreatedAt != nil &&
+		!job.CreatedAt.After(cutoff)
+}
+
+func (s *sSysPublish) recoverStaleDispatchingCycleRun(ctx context.Context, run cycleRunRecord, now *gtime.Time) error {
+	state, err := s.inspectCycleRunUnfinishedJobs(ctx, run.Id, now)
+	if err != nil {
+		return err
+	}
+	if len(state.safePendingIDs) > 0 {
+		if err = s.failSafePendingCycleJobs(ctx, run.Id, state.safePendingIDs, now); err != nil {
+			return err
+		}
+	}
+	if state.truncated || state.unsafeCount > 0 {
+		g.Log().Warning(ctx, "循环批次超时仍存在不可安全收口任务", g.Map{
+			"event": "cycle_run_timeout_blocked",
+			"runId": run.Id, "channelId": run.ChannelId,
+			"safePendingCount": len(state.safePendingIDs),
+			"unsafeCount":      state.unsafeCount, "truncated": state.truncated,
+		})
+		return nil
+	}
+	if len(state.safePendingIDs) > 0 {
+		state, err = s.inspectCycleRunUnfinishedJobs(ctx, run.Id, now)
+		if err != nil {
+			return err
+		}
+		if state.truncated || state.unsafeCount > 0 || len(state.safePendingIDs) > 0 {
+			return nil
+		}
+	}
+	if err = s.finalizeChannelCycleDelivery(ctx, run); err != nil {
+		return err
+	}
+	var current cycleRunRecord
+	if err = cycleRunAccountModel(ctx, nil).Fields("id,status").Where("id", run.Id).Scan(&current); err != nil {
+		return gerror.Wrap(err, "校验超时频道循环发送状态失败")
+	}
+	if current.Status != cycleRunStatusDispatching {
+		return nil
+	}
+	return s.markStaleDispatchingCycleRun(ctx, run, now)
+}
+
+func (s *sSysPublish) failSafePendingCycleJobs(ctx context.Context, runId int64, jobIDs []int64, now *gtime.Time) error {
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	message := "循环批次超时，任务未开始发送，已安全失败收口"
+	result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+		WhereIn("id", jobIDs).
+		Where("operation_no >= ? AND operation_no < ?", fmt.Sprintf("cycle_batch:%d:", runId), fmt.Sprintf("cycle_batch:%d;", runId)).
+		Where("status", telegramJobStatusPending).
+		WhereIn("dispatch_status", []string{"", tgDispatchStatusIdle}).
+		Where("send_phase", "").Where("asynq_task_id", "").Where("tg_message_id", 0).WhereNull("sent_at").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgAttemptTable + " a WHERE a.job_id=" + publishTgJobTable + ".id)").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgMessageTable + " m WHERE m.job_id=" + publishTgJobTable + ".id)").
+		Data(g.Map{
+			"status": telegramJobStatusFailed, "dispatch_status": tgDispatchStatusDone,
+			"next_retry_at": nil, "last_dispatch_error": message,
+			"error_message": message, "updated_at": now,
+		}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "收口循环批次安全超时任务失败")
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr == nil && affected > 0 {
+		g.Log().Warning(ctx, "循环批次安全超时任务已收口", g.Map{
+			"event": "cycle_run_safe_pending_failed", "runId": runId,
+			"jobCount": affected,
+		})
+		var failedJobs []telegramJobRecord
+		if scanErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			WhereIn("id", jobIDs).
+			Where("status", telegramJobStatusFailed).
+			Scan(&failedJobs); scanErr != nil {
+			return gerror.Wrap(scanErr, "读取循环批次安全失败任务失败")
+		}
+		for _, job := range failedJobs {
+			if closeErr := closeFailedTelegramJobOutbox(ctx, job.Id, message); closeErr != nil {
+				g.Log().Warningf(ctx, "收口循环批次失败任务Outbox失败 jobId:%d err:%+v", job.Id, closeErr)
+			}
+			if _, completeErr := s.completeProfileTelegramOperation(ctx, job, true); completeErr != nil {
+				g.Log().Warningf(ctx, "收口循环批次失败任务资料状态失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, completeErr)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *sSysPublish) markStaleDispatchingCycleRun(ctx context.Context, run cycleRunRecord, now *gtime.Time) error {
-	message := "循环批次发送状态超时且无未完成任务，已释放并等待下次调度"
-	result, err := g.DB().Model(publishCycleRunTable).Safe().Ctx(ctx).
-		Where("id", run.Id).Where("status", cycleRunStatusDispatching).
-		Data(g.Map{"status": cycleRunStatusPartial, "stage": "finished", "error_message": message, "finished_at": now, "updated_at": now}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "释放超时频道循环发送批次失败")
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	message := "循环批次发送状态超时，已安全收口并等待下次调度"
+	var released bool
+	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		result, err := tx.Model(publishCycleRunTable).Safe().Ctx(ctx).
+			Where("id", run.Id).Where("status", cycleRunStatusDispatching).
+			Data(g.Map{"status": cycleRunStatusPartial, "stage": "finished", "error_message": message, "finished_at": now, "updated_at": now}).Update()
+		if err != nil {
+			return gerror.Wrap(err, "释放超时频道循环发送批次失败")
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return nil
+		}
+		if _, err = tx.Model(publishChannelTable).Safe().Ctx(ctx).
+			Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).
+			Data(g.Map{"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now}).Update(); err != nil {
+			return gerror.Wrap(err, "清理超时频道循环占用失败")
+		}
+		released = true
 		return nil
+	})
+	if err != nil {
+		return err
 	}
-	_, _ = g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
-		Where("id", run.ChannelId).Where("cycle_active_run_id", run.Id).
-		Data(g.Map{"cycle_active_run_id": 0, "cycle_last_run_at": now, "cycle_last_error_message": message, "updated_at": now}).Update()
-	s.appendChannelCycleRunLog(ctx, run, "warning", "stale_dispatching_recovered", message, nil)
+	if released {
+		s.appendChannelCycleRunLog(ctx, run, "warning", "stale_dispatching_recovered", message, nil)
+	}
 	return nil
 }
 

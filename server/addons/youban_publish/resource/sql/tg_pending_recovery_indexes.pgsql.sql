@@ -29,5 +29,26 @@ WHERE COALESCE(status,'') NOT IN ('sent','failed','superseded','cancelled','dele
       )
   );
 
+-- Supports the bounded pending-head timeout sweep. The query uses a keyset
+-- cursor on updated_at/id and only considers jobs explicitly blocked by the
+-- channel-order wait reason. It is intentionally separate from the channel
+-- head index above because updated_at must be an index key for range scans.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ybp_tg_job_pending_head_timeout
+ON hg_youban_publish_tg_job (updated_at, id)
+INCLUDE (
+    tenant_id,
+    account_id,
+    profile_id,
+    channel_id,
+    target_chat_id,
+    operation_no,
+    next_retry_at
+)
+WHERE status = 'pending'
+  AND COALESCE(dispatch_status,'') IN ('','idle')
+  AND COALESCE(asynq_task_id,'')=''
+  AND COALESCE(send_phase,'')=''
+  AND last_dispatch_error = '等待同频道前序推送任务完成';
+
 -- IF NOT EXISTS does not repair an invalid index left by interrupted creation.
 -- Inspect pg_index.indisvalid/indisready after execution before declaring success.

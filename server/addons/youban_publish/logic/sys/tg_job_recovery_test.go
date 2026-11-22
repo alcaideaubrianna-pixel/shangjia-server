@@ -76,6 +76,49 @@ func TestTelegramPendingRecoveryPostgresSelectsHeadsBeforeDueFilters(t *testing.
 	}
 }
 
+func TestTelegramPendingHeadTimeoutQueryIsKeysetBounded(t *testing.T) {
+	query := telegramPendingHeadTimeoutPostgresSQL()
+	for _, fragment := range []string{
+		"j.status='pending'",
+		"COALESCE(j.dispatch_status,'') IN ('','idle')",
+		"j.updated_at<=?",
+		"j.next_retry_at IS NULL OR j.next_retry_at<=?",
+		"j.updated_at>?",
+		"j.updated_at=? AND j.id>?",
+		"ORDER BY j.updated_at,j.id",
+		"LIMIT ?",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("pending head timeout query missing %q: %s", fragment, query)
+		}
+	}
+	if strings.Contains(strings.ToUpper(query), "OFFSET") {
+		t.Fatal("pending head timeout query must use keyset pagination, not OFFSET")
+	}
+	if got := strings.Count(query, "?"); got != 7 {
+		t.Fatalf("pending head timeout query placeholders=%d, want 7: %s", got, query)
+	}
+}
+
+func TestTelegramPendingHeadTimeoutIsNarrowAndSafe(t *testing.T) {
+	query := telegramPendingHeadTimeoutPostgresSQL()
+	for _, fragment := range []string{
+		"COALESCE(j.asynq_task_id,'')=''",
+		"COALESCE(j.send_phase,'')=''",
+		"j.last_dispatch_error=?",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("pending head timeout query missing safety gate %q: %s", fragment, query)
+		}
+	}
+	if !strings.Contains(telegramPendingHeadTimeoutReason, "超时") {
+		t.Fatalf("timeout transition message is not explicit: %q", telegramPendingHeadTimeoutReason)
+	}
+	if telegramPendingHeadTimeoutPage <= 0 || telegramPendingHeadTimeoutPage > 100 {
+		t.Fatalf("unsafe pending timeout page size: %d", telegramPendingHeadTimeoutPage)
+	}
+}
+
 func TestTelegramPendingRecoveryProductionSnapshot(t *testing.T) {
 	if os.Getenv("YOUBAN_PUBLISH_REPLAY") != "1" {
 		t.Skip("set YOUBAN_PUBLISH_REPLAY=1 to run against an isolated production snapshot")

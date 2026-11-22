@@ -40,6 +40,20 @@ const (
 
 const expiredMessagePushPlanJobMessage = "历史消息计划任务已过期，系统自动终止"
 
+const (
+	telegramPendingHeadWaitReason    = "等待同频道前序推送任务完成"
+	telegramPendingHeadTimeoutReason = "同频道前序推送任务等待超时，任务已失败"
+	telegramPendingHeadTimeoutPage   = 25
+)
+
+type telegramPendingRedisLeaseState string
+
+const (
+	telegramPendingRedisLeaseNone        telegramPendingRedisLeaseState = "none"
+	telegramPendingRedisLeaseHeld        telegramPendingRedisLeaseState = "held"
+	telegramPendingRedisLeaseUnavailable telegramPendingRedisLeaseState = "unavailable"
+)
+
 func (s *sSysPublish) recoverInterruptedTelegramJobs(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
@@ -1068,6 +1082,9 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	now := gtime.Now()
 	nowText := telegramRecoveryTimeText(now)
 	deadline := telegramRecoveryTimeText(now.Add(-telegramPendingJobRecoverAfter))
+	if err := s.failTimedOutPendingTelegramHeads(ctx, limit, now); err != nil {
+		return err
+	}
 	candidateLimit := limit * 10
 	if candidateLimit < 100 {
 		candidateLimit = 100
@@ -1123,6 +1140,210 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 		processed++
 	}
 	return nil
+}
+
+// failTimedOutPendingTelegramHeads closes only a very narrow, safe class of
+// stuck jobs. Waiting age is not a general retry policy: a job must still be
+// pending/idle, must have no Asynq identity or send phase, and must carry the
+// explicit channel-order wait reason. The query is keyset-paginated by
+// updated_at/id and capped so recovery never walks the whole job table.
+func (s *sSysPublish) failTimedOutPendingTelegramHeads(ctx context.Context, limit int, now *gtime.Time) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	pageLimit := limit
+	if pageLimit > telegramPendingHeadTimeoutPage {
+		pageLimit = telegramPendingHeadTimeoutPage
+	}
+	if now == nil {
+		now = gtime.Now()
+	}
+	waitMinutes := cycleHeadTimeoutMinutes()
+	if waitMinutes <= 0 {
+		waitMinutes = 15
+	}
+	timeoutBefore := now.Time.Add(-time.Duration(waitMinutes) * time.Minute)
+	cursorUpdatedAt := time.Unix(0, 0).UTC()
+	var cursorID int64
+
+	var jobs []telegramJobRecord
+	var err error
+	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
+		err = g.DB().GetScan(ctx, &jobs, telegramPendingHeadTimeoutPostgresSQL(),
+			telegramPendingHeadWaitReason, now.Time, timeoutBefore,
+			cursorUpdatedAt, cursorUpdatedAt, cursorID, pageLimit)
+	} else {
+		model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+			Fields("j.id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.target_chat_id,j.operation_no,j.status,j.dispatch_status,j.send_phase,j.asynq_task_id,j.priority,j.queue_name,j.last_dispatch_error,j.next_retry_at,j.updated_at,j.created_at").
+			Where("j.status", telegramJobStatusPending).
+			Where("(j.dispatch_status = ? OR j.dispatch_status = '')", tgDispatchStatusIdle).
+			Where("COALESCE(j.asynq_task_id, '') = ''").
+			Where("COALESCE(j.send_phase, '') = ''").
+			Where("j.last_dispatch_error", telegramPendingHeadWaitReason).
+			Where("(j.next_retry_at IS NULL OR j.next_retry_at <= ?)", now).
+			Where("j.updated_at <= ?", timeoutBefore).
+			Where("(j.updated_at > ? OR (j.updated_at = ? AND j.id > ?))", cursorUpdatedAt, cursorUpdatedAt, cursorID).
+			OrderAsc("j.updated_at").OrderAsc("j.id").Limit(pageLimit)
+		err = model.Scan(&jobs)
+	}
+	if err != nil {
+		return gerror.Wrap(err, "读取超时待入队TG队首失败")
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		if job.UpdatedAt != nil {
+			cursorUpdatedAt = job.UpdatedAt.Time
+		}
+		cursorID = job.Id
+
+		evidence, evidenceErr := telegramPendingJobHasDeliveryEvidence(ctx, job.Id)
+		if evidenceErr != nil {
+			g.Log().Warningf(ctx, "检查超时TG队首发送证据失败 jobId:%d err:%+v", job.Id, evidenceErr)
+			continue
+		}
+		if evidence {
+			logTelegramQueueEvent(ctx, "pending_head_timeout_skipped", g.Map{
+				"jobId": job.Id, "channelId": job.ChannelId, "reason": "delivery_evidence",
+			}, nil)
+			continue
+		}
+
+		leaseState, leaseErr := telegramPendingJobRedisLeaseState(ctx, job)
+		if leaseErr != nil || leaseState == telegramPendingRedisLeaseUnavailable {
+			if leaseErr != nil {
+				g.Log().Warningf(ctx, "检查超时TG队首Redis租约失败，保留任务 jobId:%d err:%+v", job.Id, leaseErr)
+			}
+			continue
+		}
+		if leaseState == telegramPendingRedisLeaseHeld {
+			logTelegramQueueEvent(ctx, "pending_head_timeout_skipped", g.Map{
+				"jobId": job.Id, "channelId": job.ChannelId, "reason": "redis_lease_held",
+			}, nil)
+			continue
+		}
+
+		changed, transitionErr := s.transitionTelegramJob(ctx, telegramJobTransition{
+			JobId:          job.Id,
+			From:           []JobStatus{telegramJobStatusPending},
+			To:             telegramJobStatusFailed,
+			ErrorMessage:   telegramPendingHeadTimeoutReason,
+			DispatchStatus: jobDispatch(tgDispatchStatusDone),
+			Additional: g.Map{
+				"next_retry_at":       nil,
+				"last_dispatch_error": telegramPendingHeadTimeoutReason,
+			},
+		})
+		if transitionErr != nil {
+			g.Log().Warningf(ctx, "收口超时TG队首失败 jobId:%d err:%+v", job.Id, transitionErr)
+			continue
+		}
+		if !changed {
+			continue
+		}
+
+		if err := closeFailedTelegramJobOutbox(ctx, job.Id, telegramPendingHeadTimeoutReason); err != nil {
+			g.Log().Warningf(ctx, "收口超时TG队首Outbox失败 jobId:%d err:%+v", job.Id, err)
+		}
+		if _, err := s.completeProfileTelegramOperation(ctx, job, isCycleBatchOperation(job.OperationNo)); err != nil {
+			g.Log().Warningf(ctx, "收口超时TG队首资料状态失败 jobId:%d profileId:%d err:%+v", job.Id, job.ProfileId, err)
+		}
+		if telegramChannelQueueEnabled() && job.ChannelId > 0 {
+			if removeErr := removeTelegramChannelJob(ctx, job.ChannelId, job.Id); removeErr != nil {
+				// The durable state transition already won. A later worker will
+				// settle a stale Redis member; do not revert the terminal state.
+				g.Log().Warningf(ctx, "移除超时TG队首Redis成员失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, removeErr)
+			}
+		}
+		s.appendTelegramJobLog(ctx, job, "recovery", "failed", telegramPendingHeadTimeoutReason)
+		if wakeErr := s.wakeNextTelegramChannelJob(ctx, job); wakeErr != nil {
+			g.Log().Warningf(ctx, "收口超时TG队首后唤醒频道失败 jobId:%d channelId:%d err:%+v", job.Id, job.ChannelId, wakeErr)
+		}
+		logTelegramQueueEvent(ctx, "pending_head_timeout_failed", g.Map{
+			"jobId": job.Id, "channelId": job.ChannelId, "profileId": job.ProfileId,
+			"timeoutMinutes": waitMinutes,
+		}, nil)
+	}
+	return nil
+}
+
+func closeFailedTelegramJobOutbox(ctx context.Context, jobID int64, reason string) error {
+	if jobID <= 0 {
+		return nil
+	}
+	now := gtime.Now()
+	_, err := g.DB().Model(publishTgOutboxTable).Safe().Ctx(ctx).
+		Where("job_id", jobID).
+		WhereIn("status", []string{"pending", "processing"}).
+		Data(g.Map{
+			"status":           "delivered",
+			"lease_owner":      "",
+			"lease_expires_at": nil,
+			"delivered_at":     now,
+			"last_error":       reason,
+			"updated_at":       now,
+		}).Update()
+	return err
+}
+
+func telegramPendingHeadTimeoutPostgresSQL() string {
+	return `SELECT j.id,j.tenant_id,j.account_id,j.profile_id,j.channel_id,j.target_chat_id,
+		j.operation_no,j.status,j.dispatch_status,j.send_phase,j.asynq_task_id,j.priority,
+		j.queue_name,j.last_dispatch_error,j.next_retry_at,j.updated_at,j.created_at
+	FROM ` + publishTgJobTable + ` j
+	WHERE j.status='pending'
+		AND COALESCE(j.dispatch_status,'') IN ('','idle')
+		AND COALESCE(j.asynq_task_id,'')=''
+		AND COALESCE(j.send_phase,'')=''
+		AND j.last_dispatch_error=?
+		AND (j.next_retry_at IS NULL OR j.next_retry_at<=?)
+		AND j.updated_at<=?
+		AND (j.updated_at>? OR (j.updated_at=? AND j.id>?))
+	ORDER BY j.updated_at,j.id
+	LIMIT ?`
+}
+
+func telegramPendingJobHasDeliveryEvidence(ctx context.Context, jobID int64) (bool, error) {
+	if jobID <= 0 {
+		return false, nil
+	}
+	value, err := g.DB().GetValue(ctx, `SELECT EXISTS (
+		SELECT 1 FROM `+publishTgAttemptTable+` a WHERE a.job_id=?
+	) OR EXISTS (
+		SELECT 1 FROM `+publishTgMessageTable+` m WHERE m.job_id=?
+	)`, jobID, jobID)
+	if err != nil {
+		return false, gerror.Wrap(err, "检查TG任务发送证据失败")
+	}
+	return value.Bool(), nil
+}
+
+// Redis is authoritative for the channel execution lease. Any Redis error is
+// an unknown result, never evidence that the job is safe to terminate.
+func telegramPendingJobRedisLeaseState(ctx context.Context, job telegramJobRecord) (telegramPendingRedisLeaseState, error) {
+	if !telegramChannelQueueEnabled() || job.ChannelId <= 0 {
+		return telegramPendingRedisLeaseNone, nil
+	}
+	const script = `local owner=redis.call('GET',KEYS[1]) or ''
+local processing=redis.call('HGET',KEYS[2],'job') or ''
+local processingExists=redis.call('EXISTS',KEYS[2])
+return {owner,processing,processingExists}`
+	value, err := telegramChannelRedisDo(ctx, "EVAL", script, 2,
+		telegramChannelOrderOwnerKey(job.ChannelId), telegramChannelProcessingKey(job.ChannelId))
+	if err != nil {
+		return telegramPendingRedisLeaseUnavailable, gerror.Wrap(err, "检查TG频道Redis租约失败")
+	}
+	values := value.Array()
+	if len(values) < 3 {
+		return telegramPendingRedisLeaseUnavailable, gerror.New("TG频道Redis租约响应不完整")
+	}
+	if strings.TrimSpace(fmt.Sprint(values[0])) != "" ||
+		strings.TrimSpace(fmt.Sprint(values[1])) != "" ||
+		fmt.Sprint(values[2]) == "1" {
+		return telegramPendingRedisLeaseHeld, nil
+	}
+	return telegramPendingRedisLeaseNone, nil
 }
 
 func telegramPendingRecoveryPostgresSQL() string {
