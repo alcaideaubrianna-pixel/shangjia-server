@@ -879,6 +879,22 @@ func (s *sSysPublish) handleCollectProcessTask(ctx context.Context, task *asynq.
 		if err := refreshCollectProcessSchedule(ctx, payload, max(collectProcessScheduleTTL, delay+10*time.Second)); err != nil {
 			return err
 		}
+		g.Log().Info(ctx, "采集处理任务等待依赖，保留来源调度", g.Map{
+			"event":             "collect.process.dependency_wait",
+			"eventId":           payload.EventId,
+			"tenantId":          payload.TenantId,
+			"accountId":         payload.AccountId,
+			"sourceId":          payload.SourceId,
+			"sourceChatId":      payload.SourceChatId,
+			"ruleId":            payload.RuleId,
+			"queueLane":         collectSourceRuntimeLane(payload),
+			"delayMs":           delay.Milliseconds(),
+			"pending":           pending,
+			"workerRole":        identity.Role,
+			"workerInstanceId":  identity.InstanceID,
+			"workerRevision":    identity.Revision,
+			"workerImageDigest": identity.ImageDigest,
+		})
 		return newCollectProcessRetryError(delay, "采集处理等待当前任务依赖")
 	}
 	removeCollectProcessSourcePending(ctx, payload)
