@@ -8,9 +8,11 @@ usage() {
 用法：
   deploy/tencent-deploy-all.sh <image-tag> [角色 ...]
   deploy/tencent-deploy-all.sh --env-file <env.json> [角色 ...]
+  TENCENT_DEPLOY_TARGET=swarm deploy/tencent-deploy-all.sh <image-tag> [角色 ...]
   deploy/tencent-deploy-all.sh -h|--help
 
 默认角色：web collector background media publish scheduler account
+指定角色或使用默认角色时，所选角色并发发布，独占保护按角色执行。
 镜像模式校验 TCR 标签与摘要，同步发布 ENV、启动参数和副本数（web 2，其余 1）。
 ENV 模式合并 JSON 字符串键值对象，保留镜像、启动参数和副本数。
 Web 候选先通过逐 Pod 探测，再切换 Service。后台角色先停旧再启新。
@@ -26,7 +28,7 @@ account 和 scheduler 单实例交接。失败时恢复该角色的旧版本。
   TENCENT_KUBE_EXTRANET    获取公网 kubeconfig，默认 true
   TENCENT_DEPLOY_PROXY     本地 HTTP 代理，默认 http://127.0.0.1:6152
   TENCENT_ROLLOUT_TIMEOUT  每角色就绪等待上限，默认 5m（例如 90s、2m30s）
-  TENCENT_WEB_PARALLEL_VERIFIED=true  已验证 Web 启动配置可安全并行，部署 web 时必填
+  TENCENT_WEB_PARALLEL_VERIFIED=true  已验证 Web 可双套并行时启用红蓝；默认使用零额外副本的滚动发布
   TENCENT_WEB_READY_URL   切流后的公网健康探测，默认 https://api.xiaohuiji.cc/readyz
   TENCENT_WEB_SMOKE_SCRIPT  可执行的业务探测脚本，接收 preview <pod> 或 live <url>
   TENCENT_WEB_OBSERVE_SECONDS  切流后的持续探测时间，默认 30 秒
@@ -56,6 +58,11 @@ HELP
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
+
+DEPLOY_TARGET="${TENCENT_DEPLOY_TARGET:-swarm}"
+if [[ "$DEPLOY_TARGET" == "swarm" ]]; then
+  exec "$(dirname "$0")/swarm-deploy-local.sh" "$@"
+fi
 
 STARTED=$SECONDS
 TAG="${1:-}"
@@ -280,12 +287,10 @@ PUBLIC_READY_URL="${TENCENT_WEB_READY_URL:-https://api.xiaohuiji.cc/readyz}"
 OBSERVE_SECONDS="${TENCENT_WEB_OBSERVE_SECONDS:-30}"
 SMOKE_SCRIPT="${TENCENT_WEB_SMOKE_SCRIPT:-}"
 LOCK_NAME=youban-production-release
+WEB_PARALLEL_VERIFIED="${TENCENT_WEB_PARALLEL_VERIFIED:-false}"
+ROLLING_WEB_STRATEGY='{"type":"RollingUpdate","rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}'
 
 if [[ "$seen" == *" web "* ]]; then
-  [[ "${TENCENT_WEB_PARALLEL_VERIFIED:-}" == true ]] || {
-    echo "需要先验证现用 Web 启动方式可安全并行，再设置 TENCENT_WEB_PARALLEL_VERIFIED=true" >&2
-    exit 2
-  }
   [[ "$OBSERVE_SECONDS" =~ ^[1-9][0-9]{0,3}$ && "$PUBLIC_READY_URL" == https://* ]] || {
     echo "需要正数观察秒数和 HTTPS 入口探针" >&2
     exit 2
@@ -400,8 +405,12 @@ prepare_role() {
        | select((.spec.replicas // 0) > 0)]
     ' <<<"$DEPLOYMENT_LIST")
   fi
-  if ! source=$(jq -ce 'if length == 1 then .[0] else error("无法识别唯一在线 Deployment") end' <<<"$active_matches"); then
-    echo "[$role] 请先核对在线角色与副本" >&2
+  if ! source=$(jq -ce 'if length == 1 then .[0] else empty end' <<<"$active_matches" 2>/dev/null); then
+    if [[ "$DEPLOY_TARGET" == "tke" ]]; then
+      echo "[$role] TKE 中没有唯一在线 Deployment。该角色若已迁移到 Swarm，请使用 TENCENT_DEPLOY_TARGET=swarm；否则先核对 TKE 副本和颜色" >&2
+    else
+      echo "[$role] 请先核对在线角色与副本" >&2
+    fi
     return 1
   fi
   source_name=$(jq -er '.metadata.name' <<<"$source")
@@ -434,6 +443,20 @@ prepare_role() {
     fi
   fi
 
+  if ! jq -e --arg role "$role" '
+    [ .items[] | .spec.scaleTargetRef | .name as $name
+      | select(.kind == "Deployment" and ([$role, $role+"-red", $role+"-blue"] | index($name))) ] | length == 0
+  ' <<<"$HPA_LIST" >/dev/null; then
+    echo "[$role] 检测到 HPA，先确认发布期间的扩缩容归属" >&2
+    return 1
+  fi
+
+  if [[ "$role" == web && "$WEB_PARALLEL_VERIFIED" != true ]]; then
+    target_name="$source_name"
+    target_selector="$source_selector"
+    return 0
+  fi
+
   color=blue
   [[ "$source_name" != "$role-blue" ]] || color=red
   target_name="$role-$color"
@@ -461,14 +484,6 @@ prepare_role() {
     echo "[$role] 候选 Deployment 已存在但标签或副本数不符合红蓝交接要求" >&2
     return 1
   fi
-  if ! jq -e --arg source "$source_name" --arg target "$target_name" --arg role "$role" '
-    [ .items[] | .spec.scaleTargetRef
-      | select(.kind == "Deployment" and (.name == $role or .name == $source or .name == $target)) ] | length == 0
-  ' <<<"$HPA_LIST" >/dev/null; then
-    echo "[$role] 检测到 HPA，先确认红蓝期间的扩缩容归属" >&2
-    return 1
-  fi
-
   # A scaled-down previous color can still have a terminating Pod.
   if [[ "$role" != web ]]; then
     for name in "$role" "$role-red" "$role-blue"; do
@@ -481,8 +496,8 @@ prepare_role() {
   fi
 }
 
-stage_candidate() {
-  local desired="$1" current_env merged_env image index args method path
+release_template() {
+  local current_env merged_env image index args
   index=$(jq -er --arg role "$role" '.spec.template.spec.containers | map(.name) | index($role) // error("缺少角色容器")' <<<"$source") || return 1
   current_env=$(jq -c --argjson index "$index" '.spec.template.spec.containers[$index].env // []' <<<"$source") || return 1
   args=$(command_args_for_role "$role") || return 1
@@ -499,32 +514,37 @@ stage_candidate() {
     ' <<<"$current_env") || return 1
   fi
 
-  method=POST
-  path="$DEPLOYMENTS"
+  jq -c --arg role "$role" --arg nonce "$nonce" --arg tag "$TAG" \
+    --arg image "$image" --argjson args "$args" --argjson index "$index" \
+    --slurpfile envs <(printf '%s\n' "$merged_env") '
+    .spec.template
+    | .metadata.annotations = ((.metadata.annotations // {}) + {"youban.dev/deploy-id":$nonce})
+    | .spec.containers[$index] |= (
+        .env=($envs[0] | map(select(.name != "YOUBAN_AUTO_INIT_DATABASE" and .name != "GF_AUTO_INIT_DATABASE"))
+          + [{name:"YOUBAN_AUTO_INIT_DATABASE",value:"false"},{name:"GF_AUTO_INIT_DATABASE",value:"false"}])
+        | if $tag == "--env-file" then . else .image=$image | if $role == "web" then . else .args=$args end end
+        | if $role == "web" and ((.readinessProbe.httpGet.path // "") | startswith("/readyz?revision="))
+          then .readinessProbe.httpGet.path="/readyz" else . end
+      )
+  ' <<<"$source"
+}
+
+stage_candidate() {
+  local desired="$1" method=POST path="$DEPLOYMENTS" template staged
   if [[ "$target" != null ]]; then
     method=PUT
     path="$DEPLOYMENTS/$target_name"
   fi
-  local staged
-  staged=$(jq -c --arg role "$role" --arg name "$target_name" --arg nonce "$nonce" --arg tag "$TAG" \
-    --arg image "$image" --argjson args "$args" --argjson selector "$target_selector" \
-    --argjson index "$index" --argjson replicas "$desired" \
-    --slurpfile envs <(printf '%s\n' "$merged_env") --slurpfile target <(printf '%s\n' "$target") '
+  template=$(release_template) || return 1
+  staged=$(jq -c --arg name "$target_name" --argjson selector "$target_selector" \
+    --argjson replicas "$desired" --slurpfile template <(printf '%s\n' "$template") \
+    --slurpfile target <(printf '%s\n' "$target") '
     {
       apiVersion:"apps/v1", kind:"Deployment",
       metadata: ({name:$name,namespace:.metadata.namespace,labels:((.metadata.labels // {}) + $selector.matchLabels)}
         + if $target[0] == null then {} else ($target[0].metadata | {resourceVersion}) end),
       spec:(.spec | .replicas=$replicas | .selector=$selector
-        | .template.metadata.labels += $selector.matchLabels
-        | .template.metadata.annotations = ((.template.metadata.annotations // {}) + {"youban.dev/deploy-id":$nonce})
-        | .template.spec.containers[$index] |= (
-            .env=($envs[0] | map(select(.name != "YOUBAN_AUTO_INIT_DATABASE" and .name != "GF_AUTO_INIT_DATABASE"))
-              + [{name:"YOUBAN_AUTO_INIT_DATABASE",value:"false"},{name:"GF_AUTO_INIT_DATABASE",value:"false"}])
-            | if $tag == "--env-file" then . else .image=$image | if $role == "web" then . else .args=$args end end
-            | if $role == "web" and ((.readinessProbe.httpGet.path // "") | startswith("/readyz?revision="))
-              then .readinessProbe.httpGet.path="/readyz" else . end
-          )
-      )
+        | .template = $template[0] | .template.metadata.labels += $selector.matchLabels)
     }
   ' <<<"$source") || return 1
   printf '%s\n' "$staged" | json_request "$path?dryRun=All" "$method" >/dev/null || return 1
@@ -556,8 +576,8 @@ wait_endpoints() {
   return 1
 }
 
-promote_web() {
-  local baseline source_pods expected candidate current deadline
+check_web_baseline() {
+  local baseline source_pods expected
   baseline=$(ready_endpoints) || return 1
   baseline_uids="$baseline"
   jq -e --argjson replicas "$source_replicas" 'length == $replicas and all(.[]; type == "string")' <<<"$baseline" >/dev/null ||
@@ -569,19 +589,11 @@ promote_web() {
     echo "[web] 线上 Service 端点与当前部署副本不一致" >&2
     return 1
   fi
-  probe_public || return 1
-  candidate=$(stage_candidate "$replicas") || return 1
-  target_uid=$(jq -er '.metadata.uid' <<<"$candidate") || return 1
-  wait_for_rollout "$target_name" "$nonce" || return 1
-  probe_candidate || return 1
-  # Check that the old endpoints stayed healthy during candidate startup.
-  current=$(ready_endpoints) || return 1
-  [[ "$current" == "$baseline" ]] || return 1
-  next_service_selector=$(jq -c '.matchLabels' <<<"$target_selector") || return 1
-  web_switch_attempted=true
-  switch_web "$old_service_selector" "$next_service_selector" || return 1
-  wait_endpoints "$candidate_uids" || return 1
-  deadline=$((SECONDS + OBSERVE_SECONDS))
+  probe_public
+}
+
+observe_web() {
+  local current deadline=$((SECONDS + OBSERVE_SECONDS))
   while :; do
     current=$(ready_endpoints) || return 1
     [[ "$current" == "$candidate_uids" ]] || return 1
@@ -590,6 +602,23 @@ promote_web() {
     if (( SECONDS >= deadline )); then break; fi
     sleep 2
   done
+}
+
+promote_web() {
+  local candidate current
+  check_web_baseline || return 1
+  candidate=$(stage_candidate "$replicas") || return 1
+  target_uid=$(jq -er '.metadata.uid' <<<"$candidate") || return 1
+  wait_for_rollout "$target_name" "$nonce" || return 1
+  probe_candidate || return 1
+  # Check that the old endpoints stayed healthy during candidate startup.
+  current=$(ready_endpoints) || return 1
+  [[ "$current" == "$baseline_uids" ]] || return 1
+  next_service_selector=$(jq -c '.matchLabels' <<<"$target_selector") || return 1
+  web_switch_attempted=true
+  switch_web "$old_service_selector" "$next_service_selector" || return 1
+  wait_endpoints "$candidate_uids" || return 1
+  observe_web || return 1
   echo "[web] 已切换 $source_name → ${target_name}，保留旧版本及其就绪副本"
   echo "[web] 回滚 selector：${old_service_selector}；Service UID：$service_uid"
   # After the first two color releases, retire any remaining legacy warm replica set.
@@ -604,6 +633,65 @@ promote_web() {
       fi
     fi
   fi
+}
+
+patch_web_rollout() {
+  local current="$1" strategy="$2" template="${3:-}" dry_run="${4:-}"
+  jq -c --arg uid "$source_uid" --argjson strategy "$strategy" \
+    --slurpfile template <(printf '%s\n' "$template") '
+    [{op:"test",path:"/metadata/uid",value:$uid},
+     {op:"test",path:"/metadata/resourceVersion",value:.metadata.resourceVersion},
+     {op:"add",path:"/spec/strategy",value:$strategy}]
+    + (if ($template | length) == 0 then []
+       else [{op:"replace",path:"/spec/template",value:$template[0]}] end)
+  ' <<<"$current" | json_request "$DEPLOYMENTS/$source_name$dry_run" PATCH json-patch+json >/dev/null
+}
+
+roll_web() {
+  if (( source_replicas < 2 )); then
+    echo "[web] 零额外副本滚动发布至少需要 2 个在线副本" >&2
+    return 1
+  fi
+  replicas=$source_replicas
+  check_web_baseline || return 1
+  local template previous_strategy current
+  template=$(release_template) || return 1
+  previous_strategy=$(jq -ce '.spec.strategy' <<<"$source") || return 1
+  patch_web_rollout "$source" "$ROLLING_WEB_STRATEGY" "$template" '?dryRun=All' || return 1
+  web_rollout_attempted=true
+  echo "[web] 未验证双套并行，使用 maxSurge=0、maxUnavailable=1 滚动发布"
+  patch_web_rollout "$source" "$ROLLING_WEB_STRATEGY" "$template" || return 1
+  wait_for_rollout "$source_name" "$nonce" || return 1
+  probe_candidate || return 1
+  wait_endpoints "$candidate_uids" || return 1
+  observe_web || return 1
+  current=$(get_deployment "$source_name") || return 1
+  jq -e --arg nonce "$nonce" '.spec.template.metadata.annotations["youban.dev/deploy-id"] == $nonce' \
+    <<<"$current" >/dev/null || return 1
+  patch_web_rollout "$current" "$previous_strategy"
+}
+
+recover_rolling_web() {
+  local current previous_template previous_strategy
+  current=$(get_deployment "$source_name") || return 1
+  previous_template=$(jq -c '.spec.template' <<<"$source") || return 1
+  previous_strategy=$(jq -ce '.spec.strategy' <<<"$source") || return 1
+  if jq -e --slurpfile template <(printf '%s\n' "$previous_template") \
+    --argjson strategy "$previous_strategy" \
+    '.spec.template == $template[0] and .spec.strategy == $strategy' <<<"$current" >/dev/null; then
+    return 0
+  fi
+  jq -e --arg nonce "$nonce" '.spec.template.metadata.annotations["youban.dev/deploy-id"] == $nonce' \
+    <<<"$current" >/dev/null || return 1
+  patch_web_rollout "$current" "$ROLLING_WEB_STRATEGY" "$previous_template" || return 1
+  wait_for_rollout "$source_name" "" || return 1
+  probe_candidate || return 1
+  wait_endpoints "$candidate_uids" || return 1
+  probe_public || return 1
+  current=$(get_deployment "$source_name") || return 1
+  jq -e --slurpfile template <(printf '%s\n' "$previous_template") '.spec.template == $template[0]' \
+    <<<"$current" >/dev/null || return 1
+  patch_web_rollout "$current" "$previous_strategy"
 }
 
 promote_worker() {
@@ -623,6 +711,10 @@ promote_worker() {
 recover_role() {
   local service current pods target_node=""
   if [[ "$role" == web ]]; then
+    if [[ "$web_rollout_attempted" == true ]]; then
+      recover_rolling_web
+      return "$?"
+    fi
     [[ "$web_switch_attempted" == true ]] || return 0
     service=$(kube_request "$WEB_SERVICE" 15) || return 1
     current=$(jq -c '.spec.selector' <<<"$service") || return 1
@@ -651,11 +743,12 @@ recover_role() {
   fi
 }
 
-deploy_role() (
+deploy_role() {
   local role="$1" role_started=$SECONDS
   local source source_name source_uid source_replicas source_selector target target_name target_selector target_uid
   local web service_uid old_service_selector next_service_selector baseline_uids candidate_uids
-  local web_switch_attempted=false source_scale_attempted=false source_node="" replicas nonce
+  local web_switch_attempted=false web_rollout_attempted=false source_scale_attempted=false source_node="" replicas nonce
+  trap 'trap - EXIT; exit 143' TERM
   trap '
     rc=$?
     if (( rc != 0 )); then
@@ -669,7 +762,9 @@ deploy_role() (
     exit "$rc"
   ' EXIT
   echo "[$role] 开始红蓝部署"
-  prepare_role "$role"
+  if ! prepare_role "$role"; then
+    return 1
+  fi
   replicas="$source_replicas"
   if [[ -z "$ENV_JSON" ]]; then
     replicas=1
@@ -677,11 +772,16 @@ deploy_role() (
   fi
   nonce="$(date -u +%FT%TZ)-$$-$RANDOM"
   if [[ "$role" == web ]]; then
-    promote_web
+    if [[ "$WEB_PARALLEL_VERIFIED" == true ]]; then
+      promote_web || exit $?
+    else
+      roll_web || exit $?
+    fi
   else
-    promote_worker
+    promote_worker || exit $?
   fi
-)
+  exit 0
+}
 
 LOCK_UID=""
 safely_finished=false
@@ -704,7 +804,11 @@ cleanup_release() {
 trap cleanup_release EXIT
 finish_interrupted() {
   trap '' INT TERM
-  wait
+  local pid
+  while IFS= read -r pid; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done < <(jobs -pr)
+  echo "发布已中断，请检查已提交到 TKE 的变更和各角色副本" >&2
   exit "$1"
 }
 trap 'finish_interrupted 130' INT
@@ -715,6 +819,9 @@ if ! LOCK_UID=$(jq -cn --arg name "$LOCK_NAME" --arg owner "$release_owner" '
   {apiVersion:"v1",kind:"ConfigMap",metadata:{name:$name},data:{owner:$owner}}
 ' | json_request "$CORE/configmaps" POST | jq -er '.metadata.uid'); then
   echo "无法获取发布锁；若已有发布，请先核对其状态" >&2
+  if current_lock=$(kube_request "$CORE/configmaps/$LOCK_NAME" 8); then
+    jq -r '"锁持有者：\(.data.owner // "未知")，创建时间：\(.metadata.creationTimestamp // "未知")"' <<<"$current_lock" >&2
+  fi
   exit 1
 fi
 DEPLOYMENT_LIST=$(kube_request "$DEPLOYMENTS" 15)
@@ -726,36 +833,20 @@ wait_role() {
   local rc
   if wait "$1"; then return 0; else rc=$?; fi
   failed=1
-  if [[ "$rc" == 3 ]]; then recovery_failed=true; fi
+  if (( rc == 3 || rc > 128 )); then recovery_failed=true; fi
 }
-if [[ "$seen" == *" web "* ]]; then
-  deploy_role web &
-  wait_role "$!"
-fi
-
 pids=()
-if (( failed == 0 )); then
-  for role in "${ROLES[@]}"; do
-    case "$role" in web|account|scheduler) continue ;; esac
-    deploy_role "$role" &
-    pids+=("$!")
-  done
-fi
+for role in "${ROLES[@]}"; do
+  deploy_role "$role" &
+  pids+=("$!")
+done
 for pid in "${pids[@]}"; do
   wait_role "$pid"
 done
 
-for role in scheduler account; do
-  if (( failed != 0 )); then break; fi
-  if [[ "$seen" == *" $role "* ]]; then
-    deploy_role "$role" &
-    wait_role "$!"
-  fi
-done
-
 if [[ "$recovery_failed" == false ]]; then safely_finished=true; fi
 if (( failed )); then
-  echo "部署有失败，已停止后续批次，总耗时 $((SECONDS - STARTED)) 秒" >&2
+  echo "并发部署结束，部分角色失败，总耗时 $((SECONDS - STARTED)) 秒" >&2
   exit 1
 fi
 echo "部署成功，总耗时 $((SECONDS - STARTED)) 秒"
