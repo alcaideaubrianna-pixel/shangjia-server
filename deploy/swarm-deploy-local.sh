@@ -82,6 +82,7 @@ MANAGER_SSH_KEY="${SWARM_MANAGER_SSH_KEY:-/Users/ley/.ssh/id_hk_rsa}"
 IMAGE_REPOSITORY="${TENCENT_IMAGE_REPOSITORY:-sgccr.ccs.tencentyun.com/xiaohuiji-cc/xiaohuiji-package}"
 WEB_NODE_URL="${SWARM_WEB_NODE_URL:-http://43.160.221.143}"
 WEB_EXTERNAL_READY_URL="${SWARM_WEB_EXTERNAL_READY_URL:-https://api.xiaohuiji.cc/readyz}"
+LOG_DRIVER_ARGS="--log-driver json-file --log-opt max-size=100m --log-opt max-file=3"
 ROLES=(publish collector scheduler background media web)
 if (( ${#ROLE_ARGS[@]} > 0 )); then ROLES=("${ROLE_ARGS[@]}"); fi
 
@@ -141,7 +142,7 @@ wait_service() {
       printf '[%s] %s[%s] 状态 %s，目标 %s/%s，运行任务 %s/%s，目标摘要任务 %s/%s%s\n' "$(timestamp)" "$C_BLUE" "$service" "${state:-unknown}" "$desired" "$desired" "$running" "$desired" "$matching" "$desired" "$C_RESET"
       last_state="$progress_state"
     fi
-    if [[ "$base" == "$desired/$desired" && "$running" == "$desired" && "$matching" == "$desired" ]]; then
+    if [[ "$running" == "$desired" && "$matching" == "$desired" ]]; then
       return 0
     fi
     sleep 3
@@ -159,7 +160,7 @@ update_worker() {
   fi
   logf '%s[%s] 开始部署%s\n' "$C_YELLOW" "$role" "$C_RESET"
   desired=$(remote "sudo docker service inspect '$service' --format '{{if .Spec.Mode.Replicated}}{{.Spec.Mode.Replicated.Replicas}}{{else}}1{{end}}'")
-  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
+  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth $LOG_DRIVER_ARGS --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
   logf '%s[%s] 已提交更新，等待 %s/%s 就绪%s\n' "$C_BLUE" "$role" "$desired" "$desired" "$C_RESET"
   wait_service "$service" "$desired"
   logf '%s[%s] 部署成功，耗时 %s 秒%s\n' "$C_GREEN" "$role" "$((SECONDS - role_started))" "$C_RESET"
@@ -173,7 +174,7 @@ update_web_color() {
     return 0
   fi
   logf '%s[web-%s] 开始部署%s\n' "$C_YELLOW" "$color" "$C_RESET"
-  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
+  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth $LOG_DRIVER_ARGS --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
   logf '%s[web-%s] 已提交更新，等待 1/1 就绪%s\n' "$C_BLUE" "$color" "$C_RESET"
   wait_service "$service" 1
   if [[ -n "${SWARM_WEB_CANDIDATE_READY_URL:-}" ]]; then
