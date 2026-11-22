@@ -194,4 +194,6 @@ func init() {
 	registerBotFeature(scanFeature{})
 	registerBotFeature(quickPushFeature{})
 	registerBotFeature(exchangeRateFeature{})
+	registerBotFeature(collectSourceDiagnoseFeature{})
+	registerBotFeature(collectEventDiagnoseFeature{})
 }
