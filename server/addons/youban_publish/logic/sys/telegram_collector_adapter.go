@@ -1667,7 +1667,7 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	var relations []botCollectChannelRelation
 	if len(channelIDs) > 0 {
 		if err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-			Fields("id,channel_id,source_id,status,approval_status").
+			Fields("id,channel_id,source_id,status").
 			Where("tenant_id", tenantID).Where("account_id", accountID).
 			Where("source_id", source["id"].Int64()).
 			WhereIn("channel_id", channelIDs).Scan(&relations); !collectOptionalRecordScanSucceeded(err) {
@@ -1682,7 +1682,6 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 			CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
 			RelationExists: true,
 			Status:         relation.Status,
-			ApprovalStatus: relation.ApprovalStatus,
 		})
 		allowed := decision.Allowed
 		if !allowed {
@@ -1722,7 +1721,8 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if relation.Id > 0 {
 		return true, nil
 	}
-	// Persist the first-channel change with the discovery relation.
+	// Queue before creating the discovery relation: a crash or send failure
+	// must not permanently lose the first-channel notification.
 	decision := decideCollectChannelAccess(collectChannelAccessPolicyInput{
 		TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
 		CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
@@ -1734,35 +1734,20 @@ func (s *sSysPublish) ensureBotCollectChannelApproval(ctx context.Context, sourc
 	if decision.Allowed {
 		relationStatus = sysin.CollectAccountChannelEnabled
 	}
-	created := false
-	err := g.DB().Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
-		relationID, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
-			TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
-			CollectEnabled: introFeeBoolToInt(decision.Allowed), Status: relationStatus, ApprovalStatus: "pending",
-		}).InsertAndGetId()
-		if err != nil {
-			return err
-		}
-		created = true
-		return enqueueCollectChannelChange(ctx, collectChannelChange{
-			TenantID: tenantID, SourceID: source["id"].Int64(), ChannelID: chatID, ChannelName: channel.Title,
-			ActorType: "system", Action: "发现新频道", After: "待审核", EventID: strconv.FormatInt(relationID, 10),
-		})
-	})
+	_, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(pdo.YoubanPublishCollectAccountChannel{
+		TenantId: tenantID, AccountId: accountID, ChannelId: channel.Id, SourceId: source["id"].Int64(),
+		CollectEnabled: introFeeBoolToInt(decision.Allowed), Status: relationStatus, ApprovalStatus: "pending",
+	}).InsertAndGetId()
 	if err != nil {
-		if created {
-			return false, err
-		}
 		// A concurrent delivery may have created the relation; respect its decision.
 		var current botCollectChannelRelation
-		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,status,approval_status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
+		lookupErr := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Fields("id,channel_id,source_id,status").Where("tenant_id", tenantID).Where("account_id", accountID).Where("source_id", source["id"].Int64()).Where("channel_id", channel.Id).Scan(&current)
 		if lookupErr == nil && current.Id > 0 {
 			return decideCollectChannelAccess(collectChannelAccessPolicyInput{
 				TenantID: tenantID, AccountID: accountID, SourceID: source["id"].Int64(),
 				CanonicalChat: chatID, BotCollectScope: source["bot_collect_scope"].String(),
 				RelationExists: true,
 				Status:         current.Status,
-				ApprovalStatus: current.ApprovalStatus,
 			}).Allowed, nil
 		}
 		return false, gerror.Wrap(err, "创建BOT采集频道审批记录失败")
@@ -1983,7 +1968,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	relationCols := pdao.YoubanPublishCollectAccountChannel.Columns()
 	relationModel := func() *gdb.Model {
 		return pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-			Fields(relationCols.Id, relationCols.Status, relationCols.ApprovalStatus).
+			Fields(relationCols.Id, relationCols.Status).
 			Where(relationCols.TenantId, delivery.TenantID).Where(relationCols.AccountId, delivery.AccountID).
 			Where(relationCols.SourceId, delivery.SourceID).Where(relationCols.ChannelId, channelID)
 	}
@@ -1995,8 +1980,7 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 		return decideCollectChannelAccess(collectChannelAccessPolicyInput{
 			TenantID: delivery.TenantID, AccountID: delivery.AccountID, SourceID: delivery.SourceID,
 			CanonicalChat: chatID, RelationExists: true,
-			Status:         current[relationCols.Status].String(),
-			ApprovalStatus: current[relationCols.ApprovalStatus].String(),
+			Status: current[relationCols.Status].String(),
 		}).Allowed
 	}
 	// Absence is normal discovery, not an SQL failure. One() returns an empty
@@ -2022,23 +2006,9 @@ func (s *sSysPublish) ensureAccountCollectChannelRelation(ctx context.Context, d
 	// The unique scope fences concurrent discoveries. Ignore conflicts without
 	// updating a winning disabled/rejected/pending relation or its soft-delete
 	// tombstone. Always authorize against the winning row.
-	err = pdao.YoubanPublishCollectAccountChannel.Transaction(ctx, func(ctx context.Context, _ gdb.TX) error {
-		result, err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
-			OnConflict(strings.Join([]string{relationCols.TenantId, relationCols.AccountId, relationCols.ChannelId, relationCols.SourceId}, ",")).
-			InsertIgnore()
-		if err != nil {
-			return err
-		}
-		inserted, err := result.RowsAffected()
-		if err != nil || inserted == 0 {
-			return err
-		}
-		return enqueueCollectChannelChange(ctx, collectChannelChange{
-			TenantID: delivery.TenantID, SourceID: delivery.SourceID, ChannelID: chatID,
-			ChannelName: source[sourceCols.Title].String(), ActorType: "system",
-			Action: "发现新频道", After: "待审核", EventID: strconv.FormatInt(channelID, 10),
-		})
-	})
+	_, err = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).Data(relation).
+		OnConflict(strings.Join([]string{relationCols.TenantId, relationCols.AccountId, relationCols.ChannelId, relationCols.SourceId}, ",")).
+		InsertIgnore()
 	if err != nil {
 		return false, gerror.Wrap(err, "同步账户采集频道状态失败")
 	}

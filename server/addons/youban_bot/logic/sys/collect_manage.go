@@ -36,12 +36,15 @@ func (s *sSysBot) collectManageAllowed(ctx context.Context, account *botProfileA
 	if account == nil || account.AccountId <= 0 || account.TenantId <= 0 {
 		return false
 	}
+	if account.AccountType == "uploader" && !account.CollectPushEnabled {
+		return false
+	}
 	status, err := publishService.SysPublish().TenantVipStatus(ctx, account.TenantId)
 	return err == nil && status != nil && status.IsVip
 }
 
 func (s *sSysBot) collectRuleOwnerAccount(ctx context.Context, account *botProfileAccount, ruleID int64) *botProfileAccount {
-	if account == nil || account.AccountType != "admin" || ruleID <= 0 {
+	if account == nil || !s.collectManageAllowed(ctx, account) || ruleID <= 0 {
 		return account
 	}
 	var owner struct {
@@ -71,7 +74,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 	case "channelactioncancel":
 		return true, s.sendCollectManageNotice(ctx, botId, chatId, "已取消操作，频道采集状态和后缀保持不变。")
 	case "channelapprove", "channelreject", "channelrejectconfirm":
-		if account.AccountType != "admin" || len(parts) < 3 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 3 {
 			return true, nil
 		}
 		relationID, _ := strconv.ParseInt(parts[2], 10, 64)
@@ -92,7 +95,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		return true, s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道采集已禁用\n频道：%s\n频道 ID：%s%s\n操作原因：管理员主动禁用采集\n后续新消息将不再采集；已有资料和已推送消息保留。", html.EscapeString(firstNonEmpty(approval.ChannelTitle, approval.ChannelId)), html.EscapeString(approval.ChannelId), collectManageChannelLinkLine(approval.ChannelLink)))
 	case "approve", "reject":
-		if account.AccountType != "admin" || len(parts) < 3 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 3 {
 			return true, nil
 		}
 		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
@@ -124,7 +127,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		return true, s.showCollectSourceView(ctx, botId, chatId, account, id)
 	case "config":
 		// 采集规则包含租户级策略，仅租户管理员可以查看和修改。
-		if account.AccountType != "admin" {
+		if !s.collectManageAllowed(ctx, account) {
 			return true, s.sendCollectManageNotice(ctx, botId, chatId, "仅租户管理员可以配置采集规则。")
 		}
 		if len(parts) < 3 {
@@ -133,13 +136,13 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.showCollectSourceConfig(ctx, botId, chatId, account, sourceID)
 	case "rule":
-		if account.AccountType != "admin" || len(parts) < 3 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 3 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.showCollectRuleEditor(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID)
 	case "channels":
-		if account.AccountType != "admin" || len(parts) < 3 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 3 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
@@ -149,14 +152,14 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		}
 		return true, s.showCollectRuleChannels(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, page)
 	case "channel":
-		if account.AccountType != "admin" || len(parts) < 5 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 5 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		rowID, _ := strconv.ParseInt(parts[3], 10, 64)
 		return true, s.showCollectRuleChannel(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, rowID, parts[4])
 	case "channelstatus", "channelstatusconfirm", "channeldelete", "channeldeleteconfirm":
-		if account.AccountType != "admin" || len(parts) < 6 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 6 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
@@ -207,20 +210,20 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			text := fmt.Sprintf("确认禁用频道采集？\n频道：%s\n频道 ID：%s%s\n\n确认后不再采集该频道的新消息。已有资料、已推送消息和后缀配置保留。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink))
 			return true, s.sendCollectManageMarkup(ctx, botId, chatId, text, [][]models.InlineKeyboardButton{{{Text: "确认禁用", CallbackData: fmt.Sprintf("cm:channelstatusconfirm:%d:%d:%s:2", ruleID, rowID, item.ChannelId)}, {Text: "取消", CallbackData: "cm:channelactioncancel"}}})
 		}
-		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId, account.AccountId)
+		_, err = publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{Id: rowID, RuleId: ruleID, BotId: botId, ChannelId: item.ChannelId, Suffix: item.Suffix, Status: status}, owner.TenantId, owner.AccountId)
 		if err != nil {
 			return true, err
 		}
 		return true, s.showCollectRuleChannel(ctx, botId, chatId, owner, ruleID, rowID, parts[4])
 	case "addchannel":
-		if account.AccountType != "admin" || len(parts) < 3 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 3 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		owner := s.collectRuleOwnerAccount(ctx, account, ruleID)
 		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", map[string]interface{}{"ruleId": ruleID, "botId": botId, "accountId": owner.AccountId}, "请输入：频道ID 后缀\n例如：-1001234567890 新后缀")
 	case "channeledit", "channelinput":
-		if account.AccountType != "admin" || len(parts) < 4 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
@@ -257,27 +260,24 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		prompt := fmt.Sprintf("修改频道后缀\n频道：%s\n频道 ID：%s%s\n当前后缀：%s\n\n请发送新的频道后缀，例如：北京代理。\n发送后会显示预览，确认保存后才生效。\n发送 /cancel 取消修改。", html.EscapeString(firstNonEmpty(item.ChannelTitle, item.ChannelId)), html.EscapeString(item.ChannelId), collectManageChannelLinkLine(item.ChannelLink), html.EscapeString(firstNonEmpty(item.Suffix, "未配置")))
 		return true, s.startProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId, account, "collect_channel_add", "waiting_value", ruleID, "", payload, prompt)
 	case "ruleswitch":
-		if account.AccountType != "admin" || len(parts) < 4 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.toggleCollectRuleField(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "edit":
-		if account.AccountType != "admin" || len(parts) < 4 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.showCollectRuleField(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "editstart":
-		if account.AccountType != "admin" || len(parts) < 4 {
+		if !s.collectManageAllowed(ctx, account) || len(parts) < 4 {
 			return true, nil
 		}
 		ruleID, _ := strconv.ParseInt(parts[2], 10, 64)
 		return true, s.startCollectRuleEdit(ctx, botId, chatId, s.collectRuleOwnerAccount(ctx, account, ruleID), ruleID, parts[3])
 	case "editconfirm":
-		if account.AccountType != "admin" {
-			return true, nil
-		}
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
 		if session == nil || session.Scene != "collect_rule_edit" {
 			return true, nil
@@ -292,11 +292,8 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 		session.Step = "confirming"
 		return true, s.handleCollectRuleEditSession(ctx, botId, chatId, account, session, payload.Draft)
 	case "editcancel":
-		if account.AccountType != "admin" {
-			return true, nil
-		}
 		session := s.activeProfileSessionByIds(ctx, botId, telegramUserIdFromCtx(ctx), chatId)
-		if session == nil || session.Scene != "collect_rule_edit" {
+		if session == nil {
 			return true, nil
 		}
 		_ = s.completeProfileSession(ctx, session.Id)
@@ -336,7 +333,7 @@ func (s *sSysBot) handleCollectManageCallback(ctx context.Context, botId int64, 
 			return true, nil
 		}
 		sourceID, _ := strconv.ParseInt(parts[2], 10, 64)
-		if account.AccountType != "admin" {
+		if !s.collectManageAllowed(ctx, account) {
 			return true, s.sendCollectManageNotice(ctx, botId, chatId, "仅租户管理员可以下架并删除采集资料。")
 		}
 		res, err := publishService.SysPublish().BotCollectSourceDown(ctx, sourceID, account.TenantId, account.AccountId, true)
@@ -395,11 +392,9 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 		if locked.Status != profileSessionStatusActive || locked.Step != "confirming" || locked.PayloadJson != session.PayloadJson {
 			return gerror.New("确认已失效，请使用最新的后缀预览重新操作")
 		}
-		if locked.App != account.App || locked.TenantId != account.TenantId || locked.AccountId != account.AccountId {
-			return gerror.New("当前绑定账户已变更，请重新设置频道后缀")
-		}
-		if err := publishService.SysPublish().BotCollectManageLegacySuffix(ctx, account.TenantId, account.AccountId,
-			ownerAccountID, payload.RuleId, payload.BotId, payload.ChannelId, payload.Draft); err != nil {
+		if _, err := publishService.SysPublish().BotIntroFeeChannelRuleSave(ctx, &publishsysin.IntroFeeChannelRuleSaveInp{
+			Id: payload.Id, RuleId: payload.RuleId, BotId: payload.BotId, ChannelId: payload.ChannelId, Suffix: strings.TrimSpace(payload.Draft), Status: 1,
+		}, account.TenantId, ownerAccountID); err != nil {
 			return err
 		}
 		return s.completeProfileSession(ctx, session.Id)
@@ -407,13 +402,16 @@ func (s *sSysBot) confirmCollectChannelSuffix(ctx context.Context, botId int64, 
 	if err != nil {
 		return err
 	}
-	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
+	return s.sendCollectManageNotice(ctx, botId, chatId, fmt.Sprintf("频道后缀已保存\n频道：%s\n频道 ID：%s%s\n新后缀：%s\n采集状态：已开启\n后续新采集资料将使用此后缀。", html.EscapeString(firstNonEmpty(payload.ChannelTitle, payload.ChannelId)), html.EscapeString(payload.ChannelId), collectManageChannelLinkLine(payload.ChannelLink), html.EscapeString(strings.TrimSpace(payload.Draft))))
 }
 
 func (s *sSysBot) showCollectSourceList(ctx context.Context, botId int64, chatId string, account *botProfileAccount, page int) error {
 	const perPage = 6
 	var rows []publishsysin.CollectSourceModel
-	mod := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at")
+	mod := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("tenant_id", account.TenantId).WhereNull("deleted_at")
+	if account.AccountType == "admin" {
+		mod = mod.Where("account_id", account.AccountId)
+	}
 	if err := mod.Page(page, perPage).OrderDesc("id").Scan(&rows); err != nil {
 		return err
 	}
@@ -446,7 +444,7 @@ func (s *sSysBot) showCollectSourceList(ctx context.Context, botId int64, chatId
 
 func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId string, account *botProfileAccount, id int64) error {
 	var row publishsysin.CollectSourceModel
-	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&row); err != nil {
+	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
 	text := fmt.Sprintf("采集源：%s\n编号：%d\n状态：%s", row.Title, row.Id, map[bool]string{true: "运行中", false: "已暂停"}[row.CollectEnabled == 1])
@@ -466,7 +464,7 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 
 func (s *sSysBot) toggleCollectSource(ctx context.Context, botId int64, chatId string, account *botProfileAccount, id int64) error {
 	var row publishsysin.CollectSourceModel
-	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).WhereNull("deleted_at").Scan(&row); err != nil {
+	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
 	if row.Id <= 0 {
@@ -476,7 +474,7 @@ func (s *sSysBot) toggleCollectSource(ctx context.Context, botId int64, chatId s
 	if row.CollectEnabled != 1 {
 		enabled = 1
 	}
-	if _, err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Where("account_id", account.AccountId).Data(g.Map{"collect_enabled": enabled, "updated_at": gtime.Now()}).Update(); err != nil {
+	if _, err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).Data(g.Map{"collect_enabled": enabled, "updated_at": gtime.Now()}).Update(); err != nil {
 		return err
 	}
 	return s.showCollectSourceView(ctx, botId, chatId, account, id)
@@ -497,7 +495,7 @@ func (s *sSysBot) sendCollectManageNotice(ctx context.Context, botId int64, chat
 func (s *sSysBot) showCollectSourceConfig(ctx context.Context, botId int64, chatId string, account *botProfileAccount, sourceID int64) error {
 	var src publishsysin.CollectSourceModel
 	mod := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", sourceID).Where("tenant_id", account.TenantId).WhereNull("deleted_at")
-	if account.AccountType != "admin" {
+	if !s.collectManageAllowed(ctx, account) {
 		mod = mod.Where("account_id", account.AccountId)
 	}
 	if err := mod.Scan(&src); err != nil {

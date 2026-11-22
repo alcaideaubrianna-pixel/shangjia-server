@@ -1125,7 +1125,7 @@ func (s *sSysBot) boundProfileAccountByUser(ctx context.Context, telegramUserId 
 	if capability.AccountType == publishsysin.PublishAccountTypeUploader && capability.TelegramBindingEnabled != 1 {
 		return nil, gerror.New("当前上架账号未开启TG绑定权限，请联系管理员")
 	}
-	return &botProfileAccount{TenantId: capability.TenantId, AccountId: capability.AccountId, AccountType: capability.AccountType, App: botsysin.BotAppApi, SharedResourceEnabled: capability.SharedResourceEnabled == 1}, nil
+	return &botProfileAccount{TenantId: capability.TenantId, AccountId: capability.AccountId, AccountType: capability.AccountType, App: botsysin.BotAppApi, SharedResourceEnabled: capability.SharedResourceEnabled == 1, CollectPushEnabled: capability.CollectPushEnabled == 1}, nil
 }
 
 func extractProfileNos(text string) []string {

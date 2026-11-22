@@ -111,7 +111,7 @@ func noticeName(value string) string {
 	return html.EscapeString(value)
 }
 func accountNoticeDue() string {
-	return "((status IN ('pending','failed','bot_pending','bot_failed','collect_pending','collect_failed') AND (next_retry_at IS NULL OR next_retry_at<=?)) OR (status IN ('sending','bot_sending','collect_sending') AND lease_until<=?))"
+	return "((status IN ('pending','failed','bot_pending','bot_failed') AND (next_retry_at IS NULL OR next_retry_at<=?)) OR (status IN ('sending','bot_sending') AND lease_until<=?))"
 }
 
 func accountNoticeCandidatesPostgresSQL() string {
@@ -121,15 +121,15 @@ func accountNoticeCandidatesPostgresSQL() string {
 	// on the base table can pick the primary key and scan historical rows.
 	return fmt.Sprintf(`WITH eligible AS MATERIALIZED (
 		SELECT %[1]s FROM %[2]s
-		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed','collect_pending','collect_failed') AND %[4]s IS NULL
+		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed') AND %[4]s IS NULL
 		  AND %[5]s < 5 AND %[6]s >= ?
 		UNION ALL
 		SELECT %[1]s FROM %[2]s
-		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed','collect_pending','collect_failed') AND %[4]s <= ?
+		WHERE %[3]s IN ('pending','failed','bot_pending','bot_failed') AND %[4]s <= ?
 		  AND %[5]s < 5 AND %[6]s >= ?
 		UNION ALL
 		SELECT %[1]s FROM %[2]s
-		WHERE %[3]s IN ('sending','bot_sending','collect_sending') AND %[7]s <= ?
+		WHERE %[3]s IN ('sending','bot_sending') AND %[7]s <= ?
 		  AND %[5]s < 5 AND %[6]s >= ?
 	), candidates AS (
 		SELECT %[1]s FROM eligible ORDER BY %[1]s LIMIT ?
@@ -230,9 +230,7 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 	token := guid.S()
 	isUploaderNotice := strings.HasPrefix(row.Status, "bot_")
 	sendingStatus, failedStatus := "sending", "failed"
-	if row.Category == collectChannelChangeNoticeCategory {
-		sendingStatus, failedStatus = "collect_sending", "collect_failed"
-	} else if isUploaderNotice {
+	if isUploaderNotice {
 		sendingStatus, failedStatus = "bot_sending", "bot_failed"
 	}
 	result, err := pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, row.Id).Where(accountNoticeDue(), now, now).WhereLT(cols.Attempts, 5).Data(do.YoubanPublishAccountNotice{Status: sendingStatus, LeaseToken: token, LeaseUntil: gtime.New(now.Add(2 * time.Minute))}).Update()
@@ -246,13 +244,7 @@ func (s *sSysPublish) deliverAccountNotice(ctx context.Context, row *entity.Youb
 	if err = pdao.YoubanPublishAccountNotice.Ctx(ctx).Where(cols.Id, row.Id).Where(cols.LeaseToken, token).Scan(row); err != nil {
 		return err
 	}
-	if row.Category == collectChannelChangeNoticeCategory {
-		var skipped bool
-		skipped, err = s.deliverCollectChannelChangeNotice(ctx, row)
-		if skipped {
-			return s.finishAccountNotice(ctx, row.Id, token, "skipped", "")
-		}
-	} else if isUploaderNotice {
+	if isUploaderNotice {
 		err = s.deliverUploaderReviewNotice(ctx, row)
 	} else {
 		var enabled bool

@@ -172,9 +172,6 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	action := collectorMessageAction(command, text)
 	if query != nil {
 		action = collectorCallbackAction(query.Data)
-		if strings.HasPrefix(query.Data, uploaderCollectCallback) {
-			action = query.Data
-		}
 	}
 	if action == "" && (query != nil || session == nil || !collectorAllowsSession(session.Scene) || strings.HasPrefix(text, "/")) {
 		if query != nil {
@@ -187,9 +184,6 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	var account *botProfileAccount
 	if review != nil && (review.Status == uploaderApproved || review.Status == uploaderDirect) {
 		if review.OwnerAccountId != row.AccountId {
-			if err := s.cancelUploaderCollectSession(ctx, session); err != nil {
-				return err
-			}
 			return s.sendUploaderReplyWithoutKeyboard(ctx, row, chatID, uploaderReviewMessage(review))
 		}
 		account, err = scopedUploaderAccount(ctx, review.TenantId, row.AccountId, review.AccountId)
@@ -198,9 +192,6 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 			account, err = s.existingScopedUploaderAccount(ctx, row, user.ID)
 		}
 		if account == nil && err == nil {
-			if err := s.cancelUploaderCollectSession(ctx, session); err != nil {
-				return err
-			}
 			return s.handleUploaderRegistration(ctx, row, user, query, action, review)
 		}
 	} else {
@@ -209,9 +200,6 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 		account, err = s.resolveCollectorAccount(ctx, row, user, allowProvision)
 	}
 	if err != nil {
-		if cancelErr := s.cancelUploaderCollectSession(ctx, session); cancelErr != nil {
-			return cancelErr
-		}
 		if query != nil {
 			s.answerProfileCallback(ctx, botID, query, "上架账户不可用")
 		}
@@ -222,35 +210,7 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 	}
 
 	state.account = account
-	state.keyboard = uploaderAccountKeyboard(account)
-
-	if session != nil && session.Scene == uploaderCollectSuffixScene && !uploaderCollectSessionAllowed(account, session) {
-		if err := s.cancelUploaderCollectSession(ctx, session); err != nil {
-			return err
-		}
-		session = nil
-		if action == "" {
-			return s.sendCollectorReply(ctx, botID, chatID, "账号或采集推送权限已变更，请重新操作。")
-		}
-	}
-	if action == "collect" || strings.HasPrefix(action, uploaderCollectCallback) {
-		if query != nil {
-			s.answerProfileCallback(ctx, botID, query, "正在处理")
-		}
-		if !uploaderCollectAllowed(account) {
-			return s.sendCollectorReply(ctx, botID, chatID, "当前上架账户未开通采集推送权限。")
-		}
-		if err := s.ensureReplyKeyboardCurrent(ctx, botID, chatID); err != nil {
-			return err
-		}
-		if action == "collect" {
-			action = uploaderCollectCallback + "list:1"
-		}
-		if err := s.handleUploaderCollectCallback(ctx, botID, chatID, account, session, action); err != nil {
-			return s.replyBotError(ctx, botID, chatID, "采集推送", err)
-		}
-		return nil
-	}
+	state.keyboard = collectorReplyKeyboard(false)
 
 	if action != "menu" && action != "register" && session == nil {
 		if err := s.ensureReplyKeyboardCurrent(ctx, botID, chatID); err != nil {
@@ -281,12 +241,6 @@ func (s *sSysBot) handleCollectorPrivateUpdate(ctx context.Context, row *collect
 			if account.AccountId != session.AccountId || account.TenantId != session.TenantId {
 				return s.sendCollectorReply(ctx, botID, chatID, "当前绑定账号已变更，请重新操作")
 			}
-			if session.Scene == uploaderCollectSuffixScene {
-				if msg.Text == "" {
-					return s.sendCollectorReply(ctx, botID, chatID, "请发送文字后缀。")
-				}
-				return s.previewUploaderCollectSuffix(ctx, botID, chatID, session, text)
-			}
 			if err := s.storeTelegramMessage(ctx, botID, msg); err != nil {
 				return err
 			}
@@ -305,7 +259,7 @@ func (s *sSysBot) refreshCollectorKeyboardAfterAuthorization(ctx context.Context
 		return gerror.New("上架账户不属于当前机器人租户")
 	}
 	state.account = account
-	state.keyboard = uploaderAccountKeyboard(account)
+	state.keyboard = collectorReplyKeyboard(false)
 	return s.ensureReplyKeyboardCurrent(ctx, state.botID, chatID)
 }
 
@@ -317,8 +271,6 @@ func collectorMessageAction(command, text string) string {
 		return "publish"
 	case command == "profile" || command == "note" || text == "资料管理":
 		return "manage"
-	case text == "采集推送":
-		return "collect"
 	case text == "注册申请":
 		return "register"
 	case text == "笔记列表":
@@ -353,7 +305,7 @@ func collectorCallbackAction(data string) string {
 
 func collectorAllowsSession(scene string) bool {
 	switch scene {
-	case uploaderCollectSuffixScene, "note_page", "search", "edit", "edit_title", "edit_text", "edit_verify", "replace", "create", "batch_create":
+	case "note_page", "search", "edit", "edit_title", "edit_text", "edit_verify", "replace", "create", "batch_create":
 		return true
 	default:
 		return false
