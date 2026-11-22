@@ -32,4 +32,25 @@ sudo systemctl enable --now docker'
 "${NODE_SSH[@]}" "sudo docker swarm join --token '$join_args' '$manager_ip:2377'"
 node_name=$("${NODE_SSH[@]}" 'hostname')
 "${MANAGER_SSH[@]}" "sudo docker node update --label-add role='$ROLE' '$node_name' >/dev/null"
+
+# New Swarm nodes also need the manager's private registry credentials.
+registry_config=$("${MANAGER_SSH[@]}" 'sudo base64 -w0 /root/.docker/config.json')
+"${NODE_SSH[@]}" "sudo mkdir -p /root/.docker; printf '%s' '$registry_config' | base64 -d | sudo tee /root/.docker/config.json >/dev/null; sudo chmod 600 /root/.docker/config.json"
+
+# Lighthouse firewall rules are required for Swarm monitoring and future node discovery.
+node_ip="${NODE##*@}"
+if command -v tccli >/dev/null 2>&1 && [[ "$node_ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+  instance_id=$(tccli lighthouse DescribeInstances --region ap-singapore \
+    --Filters "[{\"Name\":\"public-ip-address\",\"Values\":[\"$node_ip\"]}]" |
+    jq -er '(.Response // .).InstanceSet[0].InstanceId')
+  tccli lighthouse CreateFirewallRules --region ap-singapore --InstanceId "$instance_id" \
+    --FirewallRules '[
+      {"Protocol":"TCP","Port":"2377,7946,19100,18080","CidrBlock":"10.3.0.0/16","Action":"ACCEPT","FirewallRuleDescription":"Swarm and monitoring internal access"},
+      {"Protocol":"UDP","Port":"7946,4789","CidrBlock":"10.3.0.0/16","Action":"ACCEPT","FirewallRuleDescription":"Swarm overlay internal access"}
+    ]' >/dev/null
+fi
+
+if [[ "${SWARM_AUTO_LOGGING:-true}" == true ]] && [[ -x "$(dirname "$0")/cls-loglistener-install.sh" ]]; then
+  "$(dirname "$0")/cls-loglistener-install.sh" "$node_ip"
+fi
 echo "节点已加入 Swarm：$node_name role=$ROLE"

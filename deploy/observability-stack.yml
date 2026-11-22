@@ -1,0 +1,28 @@
+version: '3.9'
+services:
+  otel-agent:
+    image: otel/opentelemetry-collector-contrib:0.138.0
+    user: "0:0"
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    networks: [host]
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/log:/var/log:ro
+    configs:
+      - source: otel-agent-config
+        target: /etc/otelcol-contrib/config.yaml
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.platform.os == linux
+configs:
+  otel-agent-config:
+    file: ./observability/otel-agent.yaml
+networks:
+  host:
+    external: true
+    name: host
