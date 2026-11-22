@@ -34,20 +34,21 @@ k=(kubectl --kubeconfig "$tke_config" --namespace xiaohuiji)
 | scheduler | `scheduler` | 单实例交接，验证调度租约和最近任务结果 |
 | account | `account` | 严格单实例交接，检查旧进程和会话释放；提前安排短暂停顿 |
 
-脚本继承现用 Web 启动参数。旧发布使用的 `runtime` 会启动 HTTP 和 Cron。候选 Web 并行前须根据实际 ENV 和镜像验证其不会启动重复消费者、Cron、Bot 控制面或独占会话。若另行迁移到 `web` 命令，先验证它覆盖线上鉴权、Webhook、WebSocket 与所有现用入口，并确认移出的运行职责有明确归属。验证完成后才设置 `TENCENT_WEB_PARALLEL_VERIFIED=true`。
+脚本继承现用 Web 启动参数。旧发布使用的 `runtime` 会启动 HTTP 和 Cron。候选 Web 并行前须根据实际 ENV 和镜像验证其不会启动重复消费者、Cron、Bot 控制面或独占会话。若另行迁移到 `web` 命令，先验证它覆盖线上鉴权、Webhook、WebSocket 与所有现用入口，并确认移出的运行职责有明确归属。验证完成后设置 `TENCENT_WEB_PARALLEL_VERIFIED=true` 启用 Web 红蓝。默认对现用 Web 执行 `maxSurge=0`、`maxUnavailable=1` 的滚动发布，要求至少两个在线且就绪的副本。滚动失败尝试恢复原 Pod 模板，发布或回滚验证成功后恢复原滚动策略。
 
 ## 使用脚本
 
 ```bash
+./deploy/tencent-deploy-all.sh <image-tag> web
 TENCENT_WEB_PARALLEL_VERIFIED=true ./deploy/tencent-deploy-all.sh <image-tag> web
 ./deploy/tencent-deploy-all.sh <image-tag> publish media
 ./deploy/tencent-deploy-all.sh --env-file /path/to/env.json account
 ```
 
-- 镜像模式锁定 TCR 摘要。环境变量模式保留现用镜像、启动参数和副本数。生产候选关闭启动时的空库初始化。省略角色时按 Web、普通 Worker 并发批次、Scheduler、Account 的顺序发布。
+- 镜像模式锁定 TCR 摘要。环境变量模式保留现用镜像、启动参数和副本数。生产候选关闭启动时的空库初始化。所有指定角色并发发布。省略角色时并发发布全部七个角色。有先后依赖的变更应拆成独立命令。
 - Web 候选使用 Kubernetes Pod proxy 分别访问 8000 端口的 `/readyz`，需要 `pods/proxy` 访问权限。脚本核对生产 Service 端点，切流后默认观察 30 秒，公网健康探测默认使用生产 `/readyz`。发布人可通过 `TENCENT_WEB_SMOKE_SCRIPT` 提供已演练的可执行业务探测，入口参数分别为 `preview <pod>` 和 `live <ready-url>`，返回非零会阻止切流或触发回切。首次生产切换前应验收代表性的业务接口。
-- 后台角色从同一角色的当前在线 Deployment 建立零副本候选，先等待旧 Pod 完全退出，再启动新色。Scheduler 和 Account 单独串行，且要求旧节点保持 Ready；需要读取相应 Node 的权限。部署失败会尝试恢复该角色，已成功的前序角色保持当前版本。
-- 脚本通过集群内 `youban-production-release` ConfigMap 串行化整批发布。中断或自动恢复失败时会保留锁。确认发布进程已停止、检查各角色实际副本并恢复到稳定状态后，才由值班人员移除锁。手动切流也须遵守同一发布窗口。
+- 后台角色从同一角色的当前在线 Deployment 建立零副本候选，先等待旧 Pod 完全退出，再启动新色。Scheduler 和 Account 各自执行单实例交接，且要求旧节点保持 Ready；需要读取相应 Node 的权限。部署失败会尝试恢复该角色，其他角色继续完成各自的部署。
+- 脚本通过集群内 `youban-production-release` ConfigMap 串行化整批发布。Ctrl+C 快速退出并保留锁，已经被 Kubernetes 接受的变更仍可能继续。自动恢复失败也会保留锁。确认发布进程已停止、检查各角色实际副本并恢复到稳定状态后，才由值班人员移除锁。手动切流也须遵守同一发布窗口。
 
 ## 发布前核对
 
@@ -130,6 +131,6 @@ curl -fsS --max-time 8 https://api.xiaohuiji.cc/readyz
 
 ## Worker 与独占角色交接
 
-普通 Worker 使用相同发布批次匹配两色镜像，但队列消费与 Service 切流相互独立。预发使用独立命名空间、独立队列/逻辑 DB 和测试凭据。生产候选清单可预置为零副本。只有已验证新旧消息协议、任务幂等与租约兼容时才允许重叠消费。否则先停止旧 Worker 接收新任务，等待处理中的任务确认或租约回收，然后启动候选、检查处理结果。相关角色按依赖顺序分批，独立角色才并行，并分别记录开始、就绪和耗时。
+普通 Worker 使用相同发布批次匹配两色镜像，但队列消费与 Service 切流相互独立。预发使用独立命名空间、独立队列/逻辑 DB 和测试凭据。生产候选清单可预置为零副本。只有已验证新旧消息协议、任务幂等与租约兼容时才允许重叠消费。否则先停止旧 Worker 接收新任务，等待处理中的任务确认或租约回收，然后启动候选、检查处理结果。脚本会并发执行同一命令中的所有角色。若本次版本对角色存在发布顺序依赖，发布人应拆成多条命令。分别记录各角色开始、就绪和耗时。
 
 `account` 与未经验证可并行的 `scheduler` 采用先停旧再启新的交接。开始前记录旧副本数与版本。先将旧 Deployment 缩为零，按它的**实际 selector**确认包括 Terminating 在内的旧 Pod 已退出，并核对租约、会话或调度持有者已释放。再将新 Deployment 扩为一个副本。检查镜像、就绪状态和业务日志，确认只有一个活跃持有者。回滚按同样顺序先停新、确认退出及释放，再恢复旧实例。禁止强删失联 Pod 后立即启新，旧进程仍可能存活。

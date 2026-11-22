@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -253,22 +254,54 @@ func (s *sSysPublish) collectEventMediaRows(ctx context.Context, eventId int64) 
 	return rows, nil
 }
 
+type collectEventMediaCacheContextKey struct{}
+
+type collectEventMediaCache struct {
+	mu    sync.Mutex
+	items map[int64][]collectMediaItem
+}
+
+func withCollectEventMediaCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, collectEventMediaCacheContextKey{}, &collectEventMediaCache{items: make(map[int64][]collectMediaItem)})
+}
+
+func collectEventMediaCacheFromContext(ctx context.Context) (*collectEventMediaCache, bool) {
+	cache, ok := ctx.Value(collectEventMediaCacheContextKey{}).(*collectEventMediaCache)
+	return cache, ok && cache != nil
+}
+
 func (s *sSysPublish) collectEventMediaItemsByEvent(ctx context.Context, eventIds []int64) (map[int64][]collectMediaItem, error) {
 	result := make(map[int64][]collectMediaItem, len(eventIds))
 	eventIds = uniqueIds(eventIds)
 	if len(eventIds) == 0 {
 		return result, nil
 	}
+	queryIds := eventIds
+	if mediaCache, ok := collectEventMediaCacheFromContext(ctx); ok {
+		mediaCache.mu.Lock()
+		queryIds = make([]int64, 0, len(eventIds))
+		for _, eventId := range eventIds {
+			if items, cached := mediaCache.items[eventId]; cached {
+				result[eventId] = items
+				continue
+			}
+			queryIds = append(queryIds, eventId)
+		}
+		mediaCache.mu.Unlock()
+		if len(queryIds) == 0 {
+			return result, nil
+		}
+	}
 	mediaCols := pdao.YoubanPublishCollectEventMedia.Columns()
-	rowsByEvent := make(map[int64][]*collectEventMediaRow, len(eventIds))
-	for start := 0; start < len(eventIds); start += 200 {
+	rowsByEvent := make(map[int64][]*collectEventMediaRow, len(queryIds))
+	for start := 0; start < len(queryIds); start += 200 {
 		end := start + 200
-		if end > len(eventIds) {
-			end = len(eventIds)
+		if end > len(queryIds) {
+			end = len(queryIds)
 		}
 		records, err := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 			Fields(collectEventMediaQueryFields()).
-			WhereIn(mediaCols.EventId, eventIds[start:end]).
+			WhereIn(mediaCols.EventId, queryIds[start:end]).
 			OrderAsc(mediaCols.EventId).
 			OrderAsc(mediaCols.SortIndex).
 			OrderAsc(mediaCols.Id).
@@ -283,8 +316,15 @@ func (s *sSysPublish) collectEventMediaItemsByEvent(ctx context.Context, eventId
 			rowsByEvent[row.EventId] = append(rowsByEvent[row.EventId], row)
 		}
 	}
-	for eventId, eventRows := range rowsByEvent {
-		result[eventId] = collectMediaRowsToItems(eventRows, "")
+	for _, eventId := range queryIds {
+		result[eventId] = collectMediaRowsToItems(rowsByEvent[eventId], "")
+	}
+	if mediaCache, ok := collectEventMediaCacheFromContext(ctx); ok {
+		mediaCache.mu.Lock()
+		for _, eventId := range queryIds {
+			mediaCache.items[eventId] = result[eventId]
+		}
+		mediaCache.mu.Unlock()
 	}
 	return result, nil
 }

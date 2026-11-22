@@ -230,6 +230,7 @@ func mergeCollectMaterialWindowRows(primary, retry gdb.Result, limit int) gdb.Re
 // avoids the source backlog so old events cannot delay realtime ingestion.
 func (s *sSysPublish) processTargetCollectEventWindow(ctx context.Context, payload collectProcessQueuePayload, target gdb.Record) (resultErr error) {
 	ctx = collectBusinessEventContext(ctx, target, nil, 0)
+	ctx = withCollectEventMediaCache(ctx)
 	startedAt := time.Now()
 	reuse := collectBatchReuseObservation{Outcome: collectBatchReuseNotEvaluated, Reason: collectBatchReuseInvalidTarget}
 	var batchRun collectBatchRunObservation

@@ -1,0 +1,36 @@
+receivers:
+  filelog/docker:
+    include:
+      - /var/lib/docker/containers/*/*-json.log
+    start_at: end
+    include_file_path: true
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+      - type: move
+        from: attributes.log
+        to: body
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 256
+  resource/node:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: upsert
+exporters:
+  otlp/central:
+    endpoint: otel.tke.xiaohuiji.cc:4317
+    tls:
+      insecure: true
+    sending_queue:
+      enabled: true
+      queue_size: 2048
+service:
+  pipelines:
+    logs:
+      receivers: [filelog/docker]
+      processors: [resource/node, batch]
+      exporters: [otlp/central]

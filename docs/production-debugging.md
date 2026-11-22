@@ -1,6 +1,6 @@
 # 腾讯云生产排障手册
 
-生产环境为腾讯云新加坡 `ap-singapore` 的 `Xiaohuiji-Cluster`（`cls-7wx2ohw2`），业务命名空间为 `xiaohuiji`。发布、切流及回滚见 [TKE 红蓝发布手册](../deploy/TKE.md)。
+生产环境为腾讯云新加坡轻量云 Docker Swarm 集群。发布、切流及回滚见 [Swarm 生产发布手册](../deploy/SWARM.md)。
 
 | 入口 | 用途 |
 |---|---|
@@ -102,7 +102,7 @@ tccli cls SearchLog --region ap-singapore \
 
 ## 4. Pod、Deployment 与 Service
 
-按 [TKE 连接步骤](../deploy/TKE.md#连接与权限) 建立 Bash 数组 `k`。只读排查先用名称和范围缩小检索。
+按 [Swarm 生产发布手册](../deploy/SWARM.md) 连接 Manager。只读排查先用服务名称和时间范围缩小检索。
 
 ```bash
 "${k[@]}" get deploy,rs,pod,svc -o wide
