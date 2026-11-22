@@ -3,11 +3,27 @@ package sysin
 import (
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 // Prefixes are parsed outside the expression. text: escapes reserved prefixes.
+var collectKeywordRegexCache sync.Map
+
+func compileCollectKeywordRegex(pattern string) (*regexp.Regexp, error) {
+	key := "(?i:" + pattern + ")"
+	if cached, ok := collectKeywordRegexCache.Load(key); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	expression, err := regexp.Compile(key)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := collectKeywordRegexCache.LoadOrStore(key, expression)
+	return actual.(*regexp.Regexp), nil
+}
+
 func collectKeywordParts(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "text:") {
@@ -33,7 +49,7 @@ func NormalizeCollectKeywords(values []string) ([]string, error) {
 		}
 		key := "text:" + strings.ToLower(pattern)
 		if regex {
-			if _, err := regexp.Compile("(?i:" + pattern + ")"); err != nil {
+			if _, err := compileCollectKeywordRegex(pattern); err != nil {
 				return nil, gerror.Newf("关键词正则无效 %q：%s", value, err.Error())
 			}
 			// Regex escapes are case sensitive: \d and \D are different.
@@ -56,7 +72,7 @@ func MatchCollectKeyword(text, value string) bool {
 		return false
 	}
 	if regex {
-		expression, err := regexp.Compile("(?i:" + pattern + ")")
+		expression, err := compileCollectKeywordRegex(pattern)
 		return err == nil && expression.MatchString(text)
 	}
 	return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))

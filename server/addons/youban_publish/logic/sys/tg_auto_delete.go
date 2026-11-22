@@ -285,6 +285,20 @@ func matchedAutoDeleteKeyword(text string, keywords []string) string {
 	return ""
 }
 
+var autoDeleteRegexCache sync.Map
+
+func compileAutoDeleteRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := autoDeleteRegexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	expression, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := autoDeleteRegexCache.LoadOrStore(pattern, expression)
+	return actual.(*regexp.Regexp), nil
+}
+
 func matchedAutoDeleteRule(text string, rules []string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -297,7 +311,7 @@ func matchedAutoDeleteRule(text string, rules []string) string {
 		if pattern == "" {
 			continue
 		}
-		re, err := regexp.Compile(pattern)
+		re, err := compileAutoDeleteRegex(pattern)
 		if err != nil {
 			continue
 		}
