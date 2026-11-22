@@ -41,38 +41,17 @@ type collectEventMediaRow struct {
 }
 
 func (s *sSysPublish) appendCollectEventLog(ctx context.Context, eventId int64, stage string, status string, message string, meta string) {
-	if eventId <= 0 {
+	if eventId <= 0 || skipCollectEventLog(stage, status, message) {
 		return
 	}
-	if skipCollectEventLog(stage, status, message) {
-		return
-	}
-	cols := pdao.YoubanPublishCollectEventLog.Columns()
-	eventCols := pdao.YoubanPublishCollectEvent.Columns()
-	tenantId := int64(0)
-	accountId := int64(0)
-	event, _ := pdao.YoubanPublishCollectEvent.Ctx(ctx).
-		Fields(eventCols.TenantId, eventCols.AccountId).
-		Where(eventCols.Id, eventId).
-		One()
-	if !event.IsEmpty() {
-		tenantId = event[eventCols.TenantId].Int64()
-		accountId = event[eventCols.AccountId].Int64()
-	}
-	_, err := pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
-		cols.TenantId:  tenantId,
-		cols.AccountId: accountId,
-		cols.EventId:   eventId,
-		cols.Stage:     strings.TrimSpace(stage),
-		cols.Status:    strings.TrimSpace(status),
-		cols.Message:   strings.TrimSpace(message),
-		cols.MetaText:  strings.TrimSpace(meta),
-		cols.CreatedAt: gtime.Now(),
-	}).Insert()
-	if err != nil {
-		observeDurableLogWriteFailure(ctx, "collect_event")
-		g.Log().Warningf(ctx, "采集事件持久日志写入失败 eventId:%d stage:%s status:%s err:%+v", eventId, stage, status, err)
-	}
+	g.Log().Info(ctx, "采集事件日志", g.Map{
+		"event":   "collect.event.log",
+		"eventId": eventId,
+		"stage":   strings.TrimSpace(stage),
+		"status":  strings.TrimSpace(status),
+		"message": strings.TrimSpace(message),
+		"meta":    strings.TrimSpace(meta),
+	})
 }
 
 func (s *sSysPublish) appendCollectEventLogForRecord(ctx context.Context, event gdb.Record, stage string, status string, message string, meta string) {
@@ -86,27 +65,19 @@ func (s *sSysPublish) appendCollectEventLogForRecord(ctx context.Context, event 
 }
 
 func (s *sSysPublish) appendCollectEventLogWithOwner(ctx context.Context, eventId int64, tenantId int64, accountId int64, stage string, status string, message string, meta string) {
-	if eventId <= 0 {
+	if eventId <= 0 || skipCollectEventLog(stage, status, message) {
 		return
 	}
-	if skipCollectEventLog(stage, status, message) {
-		return
-	}
-	cols := pdao.YoubanPublishCollectEventLog.Columns()
-	_, err := pdao.YoubanPublishCollectEventLog.Ctx(ctx).Data(g.Map{
-		cols.TenantId:  tenantId,
-		cols.AccountId: accountId,
-		cols.EventId:   eventId,
-		cols.Stage:     strings.TrimSpace(stage),
-		cols.Status:    strings.TrimSpace(status),
-		cols.Message:   strings.TrimSpace(message),
-		cols.MetaText:  strings.TrimSpace(meta),
-		cols.CreatedAt: gtime.Now(),
-	}).Insert()
-	if err != nil {
-		observeDurableLogWriteFailure(ctx, "collect_event")
-		g.Log().Warningf(ctx, "采集事件持久日志写入失败 eventId:%d stage:%s status:%s err:%+v", eventId, stage, status, err)
-	}
+	g.Log().Info(ctx, "采集事件日志", g.Map{
+		"event":     "collect.event.log",
+		"eventId":   eventId,
+		"tenantId":  tenantId,
+		"accountId": accountId,
+		"stage":     strings.TrimSpace(stage),
+		"status":    strings.TrimSpace(status),
+		"message":   strings.TrimSpace(message),
+		"meta":      strings.TrimSpace(meta),
+	})
 }
 
 func skipCollectEventLog(stage string, status string, message string) bool {
