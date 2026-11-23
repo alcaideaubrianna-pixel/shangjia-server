@@ -228,6 +228,7 @@ func (s *sSysPublish) runTelegramJobRecoveryCycle(ctx context.Context, nextStep 
 		{"expired_message_plan", "终止过期历史消息计划任务", func(ctx context.Context) error { return s.supersedeExpiredMessagePushPlanJobs(ctx, 1000) }},
 		{"pre_attempt", "恢复发送Attempt创建前中断的TG任务", func(ctx context.Context) error { return s.recoverStalePreAttemptTelegramJobs(ctx, 200) }},
 		{"confirmed_job", "收口已确认TG推送任务", func(ctx context.Context) error { return s.recoverConfirmedTelegramJobs(ctx, 200) }},
+		{"late_verify_media", "恢复验证媒体迟到的TG任务", func(ctx context.Context) error { return s.recoverLateVerifyMediaTelegramJobs(ctx, 100) }},
 		{"channel_queue_recovery", "恢复频道队列队首任务", func(ctx context.Context) error {
 			return s.recoverPendingIdleTelegramJobs(ctx, telegramOutboxRecoveryBatchSize())
 		}},
@@ -352,6 +353,63 @@ func (s *sSysPublish) recoverConfirmedTelegramJobs(ctx context.Context, limit in
 // Legacy account responses mislabeled verification messages as display. Repair
 // only the local projection supported by a complete, explicit verify response.
 // Never alter the response audit, resurrect deleted messages, or send again.
+// recoverLateVerifyMediaTelegramJobs reopens only jobs that were marked as
+// display-only before verification media became available. The bounded query
+// uses profile_id/media purpose and job_id/attempt indexes; it never scans all
+// publish jobs and never touches a job that already has a verify Attempt.
+func (s *sSysPublish) recoverLateVerifyMediaTelegramJobs(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	var jobs []telegramJobRecord
+	now := gtime.Now()
+	if err := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
+		Fields("j.*").
+		WhereIn("j.status", []string{telegramJobStatusSent, telegramJobStatusPending, telegramJobStatusRetryWait}).
+		Where("j.send_phase", telegramSendPhaseCompletedNoVerify).
+		WhereLTE("j.updated_at", now.Add(-time.Minute)).
+		Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " m WHERE m.profile_id=j.profile_id AND m.purpose='verify' AND m.deleted_at IS NULL)").
+		Where("NOT EXISTS (SELECT 1 FROM " + publishTgAttemptTable + " a WHERE a.job_id=j.id AND a.phase='verify')").
+		OrderAsc("j.updated_at").OrderAsc("j.id").Limit(limit).Scan(&jobs); err != nil {
+		return gerror.Wrap(err, "读取验证媒体迟到TG任务失败")
+	}
+	for _, job := range jobs {
+		if job.Id <= 0 {
+			continue
+		}
+		result, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("status", []string{telegramJobStatusSent, telegramJobStatusPending, telegramJobStatusRetryWait}).
+			Where("send_phase", telegramSendPhaseCompletedNoVerify).
+			Where("EXISTS (SELECT 1 FROM " + publishMediaTable + " m WHERE m.profile_id=" + publishTgJobTable + ".profile_id AND m.purpose='verify' AND m.deleted_at IS NULL)").
+			Where("NOT EXISTS (SELECT 1 FROM " + publishTgAttemptTable + " a WHERE a.job_id=" + publishTgJobTable + ".id AND a.phase='verify')").
+			Data(g.Map{
+				"status": telegramJobStatusRetryWait, "dispatch_status": tgDispatchStatusIdle,
+				"send_phase":    telegramSendPhaseDisplayConfirmed,
+				"next_retry_at": nil, "last_dispatch_error": "验证媒体已就绪，恢复验证资料发送",
+				"updated_at": gtime.Now(),
+			}).Update()
+		if err != nil {
+			return gerror.Wrapf(err, "恢复验证媒体迟到TG任务失败 jobId:%d", job.Id)
+		}
+		changed, _ := result.RowsAffected()
+		if changed == 0 {
+			continue
+		}
+		if err := s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
+			return gerror.Wrapf(err, "恢复验证媒体迟到TG任务Outbox失败 jobId:%d", job.Id)
+		}
+		if _, err := wakeTelegramChannelOrderOwner(ctx, job); err != nil {
+			return gerror.Wrapf(err, "恢复验证媒体迟到TG任务频道队列失败 jobId:%d", job.Id)
+		}
+		logTelegramQueueEvent(ctx, "late_verify_media_recovered", g.Map{
+			"jobId": job.Id, "profileId": job.ProfileId, "channelId": job.ChannelId,
+			"operationNo": job.OperationNo, "reason": "verify_media_ready_after_completed_without_verify",
+		}, nil)
+	}
+	return nil
+}
+
 func (s *sSysPublish) repairConfirmedTelegramVerifyPurpose(ctx context.Context, jobID int64) error {
 	var repaired int64
 	err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
