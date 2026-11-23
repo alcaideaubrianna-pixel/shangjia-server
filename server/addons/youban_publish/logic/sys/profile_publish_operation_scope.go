@@ -331,6 +331,15 @@ func (s *sSysPublish) settleSupersededTelegramSend(ctx context.Context, job tele
 	if err != nil {
 		return gerror.Wrap(err, "持久化TG旧发送收尾失败")
 	}
+	if awaiting && transitioned {
+		// The previous delivery handoff may already have marked the durable
+		// Outbox row delivered. Re-arm it after the state transition, otherwise
+		// the Job is idle/retryable in PostgreSQL but has no queue wake-up and
+		// can remain stuck before verification.
+		if rearmErr := s.rearmTelegramJobOutbox(ctx, job.Id, 0); rearmErr != nil {
+			return gerror.Wrap(rearmErr, "恢复TG任务后重新入队失败")
+		}
+	}
 	decision := "ownership_changed"
 	if retired && !transitioned {
 		decision = "superseded_outbox_repair"
