@@ -339,6 +339,9 @@ func (s *sSysPublish) settleSupersededTelegramSend(ctx context.Context, job tele
 		if rearmErr := s.rearmTelegramJobOutbox(ctx, job.Id, 0); rearmErr != nil {
 			return gerror.Wrap(rearmErr, "恢复TG任务后重新入队失败")
 		}
+		if _, wakeErr := wakeTelegramChannelOrderOwner(ctx, job); wakeErr != nil {
+			return gerror.Wrap(wakeErr, "恢复TG任务后唤醒频道顺序队列失败")
+		}
 	}
 	decision := "ownership_changed"
 	if retired && !transitioned {
