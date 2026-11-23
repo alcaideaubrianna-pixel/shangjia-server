@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	"hotgo/internal/library/cache"
 )
 
 type channelBotAttachTaskPayload struct {
@@ -29,6 +31,18 @@ type channelBotAttachTaskPayload struct {
 	ChannelID   string  `json:"channelId"`
 	AccessHash  string  `json:"accessHash"`
 	BotIDs      []int64 `json:"botIds"`
+}
+
+const channelCheckBotIdentityTTL = 10 * time.Minute
+
+type channelCheckBotIdentity struct {
+	Id       int64  `json:"id"`
+	Username string `json:"username"`
+}
+
+func channelCheckBotIdentityCacheKey(botItem *sysin.BotModel) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(botItem.BotToken)))
+	return fmt.Sprintf("youban_publish:channel_check:bot_identity:%d:%x", botItem.Id, digest[:8])
 }
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
@@ -255,15 +269,28 @@ func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.
 		logChannelCheckStage(ctx, "bot_client_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
 		return false, false, false, err.Error()
 	}
-	profile, err := bot.GetMe(ctx)
-	if err != nil {
-		logChannelCheckStage(ctx, "bot_get_me_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
-		return false, false, false, err.Error()
+	var userID int64
+	identityKey := channelCheckBotIdentityCacheKey(botItem)
+	if cached, cacheErr := cache.Instance().Get(ctx, identityKey); cacheErr == nil && !cached.IsNil() {
+		var identity channelCheckBotIdentity
+		if scanErr := cached.Scan(&identity); scanErr == nil && identity.Id > 0 {
+			userID = identity.Id
+			logChannelCheckStage(ctx, "bot_get_me_cache_hit", 0, fmt.Sprint(chatID), botItem.Id, startedAt, nil)
+		}
 	}
-	logChannelCheckStage(ctx, "bot_get_me_completed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, nil)
+	if userID == 0 {
+		profile, getMeErr := bot.GetMe(ctx)
+		if getMeErr != nil {
+			logChannelCheckStage(ctx, "bot_get_me_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, getMeErr)
+			return false, false, false, getMeErr.Error()
+		}
+		userID = profile.ID
+		_ = cache.Instance().Set(ctx, identityKey, channelCheckBotIdentity{Id: profile.ID, Username: profile.Username}, channelCheckBotIdentityTTL)
+		logChannelCheckStage(ctx, "bot_get_me_completed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, nil)
+	}
 	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{
 		ChatID: chatID,
-		UserID: profile.ID,
+		UserID: userID,
 	})
 	if err != nil {
 		logChannelCheckStage(ctx, "bot_get_member_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
