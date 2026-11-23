@@ -31,6 +31,7 @@ type channelBotAttachTaskPayload struct {
 }
 
 func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCheckInp) (res *sysin.ChannelCheckModel, err error) {
+	startedAt := time.Now()
 	account, err := s.currentAdminAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -38,9 +39,11 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	if in == nil || in.TgAccountId <= 0 {
 		return nil, gerror.New("请选择TG账号")
 	}
+	logChannelCheckStage(ctx, "started", in.TgAccountId, in.TargetChatId, 0, startedAt, nil)
 	checkCtx, cancelCheck := context.WithTimeout(ctx, 40*time.Second)
 	res, err = s.checkAdminChannelBots(checkCtx, in, account.TenantId, true)
 	cancelCheck()
+	logChannelCheckStage(ctx, "check_completed", in.TgAccountId, in.TargetChatId, 0, startedAt, err)
 	if err != nil || res == nil {
 		return res, err
 	}
@@ -49,13 +52,32 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	if err = s.persistChannelBotPermission(persistCtx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.BotResults); err != nil {
 		return nil, gerror.Wrap(err, "保存频道 Bot 权限检测结果失败")
 	}
+	logChannelCheckStage(ctx, "persist_completed", in.TgAccountId, res.TargetChatId, 0, startedAt, nil)
 	cacheCtx, cancelCache := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	s.refreshAutoDeleteChannelCache(cacheCtx)
 	cancelCache()
 	return res, nil
 }
 
+func logChannelCheckStage(ctx context.Context, stage string, tgAccountId int64, channelId string, botId int64, startedAt time.Time, stageErr error) {
+	fields := g.Map{
+		"event":       "publish_channel_check_stage",
+		"stage":       stage,
+		"tgAccountId": tgAccountId,
+		"channelId":   normalizeTelegramChannelChatID(channelId),
+		"botId":       botId,
+		"durationMs":  time.Since(startedAt).Milliseconds(),
+	}
+	if stageErr != nil {
+		fields["error"] = stageErr.Error()
+		g.Log().Warning(ctx, "频道 Bot 检查阶段完成", fields)
+		return
+	}
+	g.Log().Info(ctx, "频道 Bot 检查阶段完成", fields)
+}
+
 func (s *sSysPublish) refreshChannelCacheBeforeCheck(ctx context.Context, tenantId, tgAccountId int64) error {
+	startedAt := time.Now()
 	collectorservice.AccountRuntime().Refresh()
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
 		TenantID:    tenantId,
@@ -66,17 +88,24 @@ func (s *sSysPublish) refreshChannelCacheBeforeCheck(ctx context.Context, tenant
 		MaxAttempts: 1,
 	}, 500*time.Millisecond)
 	if err != nil {
+		logChannelCheckStage(ctx, "refresh_cache_failed", tgAccountId, "", 0, startedAt, err)
 		return gerror.Wrap(err, "刷新频道实时状态失败")
 	}
 	if task == nil {
+		logChannelCheckStage(ctx, "refresh_cache_failed", tgAccountId, "", 0, startedAt, gerror.New("task_nil"))
 		return gerror.New("刷新频道实时状态失败")
 	}
 	if task.Status == collectorin.AccountTaskStatusDead {
 		if strings.TrimSpace(task.ErrorMessage) != "" {
-			return gerror.New(task.ErrorMessage)
+			err = gerror.New(task.ErrorMessage)
+			logChannelCheckStage(ctx, "refresh_cache_failed", tgAccountId, "", 0, startedAt, err)
+			return err
 		}
-		return gerror.New("刷新频道实时状态失败，请稍后重试")
+		err = gerror.New("刷新频道实时状态失败，请稍后重试")
+		logChannelCheckStage(ctx, "refresh_cache_failed", tgAccountId, "", 0, startedAt, err)
+		return err
 	}
+	logChannelCheckStage(ctx, "refresh_cache_completed", tgAccountId, "", 0, startedAt, nil)
 	return nil
 }
 
@@ -204,21 +233,27 @@ func (s *sSysPublish) channelCheckBots(ctx context.Context, ids []int64, tenantI
 }
 
 func (s *sSysPublish) checkBotChannelMember(ctx context.Context, botItem *sysin.BotModel, chatID any) (canSend bool, canDelete bool, inChannel bool, message string) {
+	startedAt := time.Now()
 	bot, err := s.telegramBot(ctx, botItem.BotToken)
 	if err != nil {
+		logChannelCheckStage(ctx, "bot_client_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
 		return false, false, false, err.Error()
 	}
 	profile, err := bot.GetMe(ctx)
 	if err != nil {
+		logChannelCheckStage(ctx, "bot_get_me_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
 		return false, false, false, err.Error()
 	}
+	logChannelCheckStage(ctx, "bot_get_me_completed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, nil)
 	member, err := bot.GetChatMember(ctx, &tgbot.GetChatMemberParams{
 		ChatID: chatID,
 		UserID: profile.ID,
 	})
 	if err != nil {
+		logChannelCheckStage(ctx, "bot_get_member_failed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, err)
 		return false, false, false, channelBotMemberErrorMessage(err.Error())
 	}
+	logChannelCheckStage(ctx, "bot_get_member_completed", 0, fmt.Sprint(chatID), botItem.Id, startedAt, nil)
 	canSend = telegramBotCanSendMessage(member)
 	canDelete = telegramBotCanDeleteMessage(member)
 	inChannel = member.Type != models.ChatMemberTypeLeft && member.Type != models.ChatMemberTypeBanned
@@ -260,20 +295,28 @@ func channelCheckTelegramErrorMessage(err error) string {
 }
 
 func (s *sSysPublish) attachChannelBots(ctx context.Context, tenantId int64, tgAccountId int64, channel *sysin.ChannelCacheModel, bots []*sysin.BotModel) error {
+	startedAt := time.Now()
 	submit, err := channelBotAttachTaskSubmit(tenantId, tgAccountId, channel, bots)
 	if err != nil {
+		logChannelCheckStage(ctx, "attach_bots_submit_failed", tgAccountId, channel.ChannelId, 0, startedAt, err)
 		return err
 	}
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, submit, 500*time.Millisecond)
 	if err != nil {
+		logChannelCheckStage(ctx, "attach_bots_failed", tgAccountId, channel.ChannelId, 0, startedAt, err)
 		return gerror.Wrap(err, "提交频道Bot管理任务失败")
 	}
 	if task == nil || task.Status != collectorin.AccountTaskStatusCompleted {
 		if task != nil && strings.TrimSpace(task.ErrorMessage) != "" {
-			return gerror.New(task.ErrorMessage)
+			err = gerror.New(task.ErrorMessage)
+			logChannelCheckStage(ctx, "attach_bots_failed", tgAccountId, channel.ChannelId, 0, startedAt, err)
+			return err
 		}
-		return gerror.New("频道Bot管理任务未完成，请稍后重新检测")
+		err = gerror.New("频道Bot管理任务未完成，请稍后重新检测")
+		logChannelCheckStage(ctx, "attach_bots_failed", tgAccountId, channel.ChannelId, 0, startedAt, err)
+		return err
 	}
+	logChannelCheckStage(ctx, "attach_bots_completed", tgAccountId, channel.ChannelId, 0, startedAt, nil)
 	return nil
 }
 
