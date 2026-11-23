@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,12 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	if err != nil {
 		return nil, err
 	}
+	if in == nil || in.TgAccountId <= 0 {
+		return nil, gerror.New("请选择TG账号")
+	}
+	if err = s.refreshChannelCacheBeforeCheck(ctx, account.TenantId, in.TgAccountId); err != nil {
+		return nil, err
+	}
 	checkCtx, cancelCheck := context.WithTimeout(ctx, 40*time.Second)
 	res, err = s.checkAdminChannelBots(checkCtx, in, account.TenantId, true)
 	cancelCheck()
@@ -49,6 +56,30 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	s.refreshAutoDeleteChannelCache(cacheCtx)
 	cancelCache()
 	return res, nil
+}
+
+func (s *sSysPublish) refreshChannelCacheBeforeCheck(ctx context.Context, tenantId, tgAccountId int64) error {
+	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
+		TenantID:    tenantId,
+		AccountID:   tgAccountId,
+		TaskType:    collectorin.AccountTaskTypeDialogCacheRefresh,
+		TaskKey:     fmt.Sprintf("channel-check-dialog-refresh:%d:%d", tgAccountId, time.Now().UnixNano()),
+		Priority:    100,
+		MaxAttempts: 1,
+	}, 500*time.Millisecond)
+	if err != nil {
+		return gerror.Wrap(err, "刷新频道实时状态失败")
+	}
+	if task == nil {
+		return gerror.New("刷新频道实时状态失败")
+	}
+	if task.Status == collectorin.AccountTaskStatusDead {
+		if strings.TrimSpace(task.ErrorMessage) != "" {
+			return gerror.New(task.ErrorMessage)
+		}
+		return gerror.New("刷新频道实时状态失败，请稍后重试")
+	}
+	return nil
 }
 
 func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.ChannelCheckInp, tenantId int64, tryAttachBot bool) (*sysin.ChannelCheckModel, error) {
