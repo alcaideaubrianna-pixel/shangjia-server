@@ -22,7 +22,7 @@ processors:
         action: upsert
 exporters:
   otlp/central:
-    endpoint: otel.tke.xiaohuiji.cc:4317
+    endpoint: otel.xiaohuiji.internal:4317
     tls:
       insecure: true
     sending_queue:
