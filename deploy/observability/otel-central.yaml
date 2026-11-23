@@ -43,14 +43,8 @@ processors:
     - key: cookie
       action: delete
 exporters:
-  otlphttp/cls:
-    logs_endpoint: https://ap-singapore.cls.tencentyun.com/v1/logs
-    headers:
-      Authorization: "Basic ${env:CLS_OTEL_AUTH}"
-      topic_id: "78dbfc24-a063-4a29-b758-ac9ad5fd7cac"
-    compression: gzip
   otlphttp/victorialogs:
-    logs_endpoint: http://10.3.0.4:19428/insert/opentelemetry/v1/logs
+    logs_endpoint: http://10.3.0.10:19428/insert/opentelemetry/v1/logs
     timeout: 8s
     sending_queue:
       enabled: true
@@ -90,7 +84,6 @@ service:
       - resource/tencent
       - batch
       exporters:
-      - otlphttp/cls
       - otlphttp/victorialogs
     traces/victoria:
       receivers:

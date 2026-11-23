@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+endpoint="${YOUBAN_LOG_ENDPOINT:-https://43.159.50.113.sslip.io}"
+log_user="${YOUBAN_LOG_USER:-youban}"
+token_file="${YOUBAN_LOG_TOKEN_FILE:-$HOME/.codex/youban-log-token}"
+timeout_seconds="${YOUBAN_LOG_TIMEOUT_SECONDS:-15}"
+
+usage() {
+  cat <<'EOF'
+用法:
+  tools/youban-logctl health [选项]
+  tools/youban-logctl errors [选项]
+  tools/youban-logctl query [查询表达式] [选项]
+
+常用选项:
+  --role NAME             按角色过滤，例如 publish、collector
+  --node NAME             按节点过滤，例如 VM-0-8-ubuntu
+  --service NAME          按服务过滤，例如 xiaohuiji-publish
+  --container NAME        按容器过滤
+  --since DURATION        时间范围，默认 15m，例如 30m、1h、24h
+  --limit NUMBER          返回数量，默认 200
+  --endpoint URL          覆盖日志 HTTPS 地址
+  --help                  显示帮助
+
+环境变量:
+  YOUBAN_LOG_ENDPOINT     默认 https://43.159.50.113.sslip.io
+  YOUBAN_LOG_USER         默认 youban
+  YOUBAN_LOG_TOKEN        直接提供密钥；优先级高于密钥文件
+  YOUBAN_LOG_TOKEN_FILE   默认 ~/.codex/youban-log-token
+
+示例:
+  tools/youban-logctl health
+  tools/youban-logctl errors --role publish --node VM-0-8-ubuntu --since 30m
+  tools/youban-logctl query 'trace_id:"ABC123"' --role collector --limit 100
+  tools/youban-logctl query 'timeout OR panic' --service xiaohuiji-web --since 1h
+EOF
+}
+
+die() {
+  printf '错误: %s\n\n' "$*" >&2
+  usage >&2
+  exit 2
+}
+
+query_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+command_name="${1:-}"
+[[ -n "$command_name" ]] || die "缺少命令"
+shift || true
+
+case "$command_name" in
+  health|errors|query) ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    die "未知命令: $command_name"
+    ;;
+esac
+
+since="${YOUBAN_LOG_SINCE:-15m}"
+limit="${YOUBAN_LOG_LIMIT:-200}"
+custom_query="${YOUBAN_LOG_QUERY:-}"
+role=""
+node=""
+service=""
+container=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --role|--node|--service|--container|--since|--limit|--endpoint)
+      [[ $# -ge 2 ]] || die "$1 需要参数"
+      case "$1" in
+        --role) role="$2" ;;
+        --node) node="$2" ;;
+        --service) service="$2" ;;
+        --container) container="$2" ;;
+        --since) since="$2" ;;
+        --limit) limit="$2" ;;
+        --endpoint) endpoint="$2" ;;
+      esac
+      shift 2
+      ;;
+    --)
+      shift
+      [[ $# -eq 0 ]] || die "不支持的位置参数: $*"
+      ;;
+    -*)
+      die "未知选项: $1"
+      ;;
+    *)
+      [[ "$command_name" == "query" && -z "$custom_query" ]] || die "多余参数: $1"
+      custom_query="$1"
+      shift
+      ;;
+  esac
+done
+
+curl_args=(-fsS --max-time "$timeout_seconds")
+if [[ -n "${YOUBAN_LOG_TOKEN:-}" ]]; then
+  curl_args+=(-u "${log_user}:${YOUBAN_LOG_TOKEN}")
+elif [[ -r "$token_file" ]]; then
+  curl_args+=(-u "${log_user}:$(<"$token_file")")
+else
+  die "找不到日志密钥，请设置 YOUBAN_LOG_TOKEN 或 YOUBAN_LOG_TOKEN_FILE"
+fi
+
+if [[ "$command_name" == "health" ]]; then
+  curl "${curl_args[@]}" "${endpoint%/}/health"
+  exit 0
+fi
+
+filters=()
+[[ -n "$role" ]] && filters+=("role:\"$(query_escape "$role")\"")
+[[ -n "$node" ]] && filters+=("node:\"$(query_escape "$node")\"")
+[[ -n "$service" ]] && filters+=("service.name:\"$(query_escape "$service")\"")
+[[ -n "$container" ]] && filters+=("container.name:\"$(query_escape "$container")\"")
+
+query="$custom_query"
+if [[ "$command_name" == "errors" && -z "$query" ]]; then
+  query='(_msg:ERROR OR _msg:WARN OR _msg:panic OR _msg:timeout OR _msg:connection)'
+fi
+for filter in "${filters[@]}"; do
+  if [[ -n "$query" ]]; then
+    query="($query) AND $filter"
+  else
+    query="$filter"
+  fi
+done
+[[ -n "$query" ]] || die "query/errors 至少需要查询表达式或过滤条件"
+
+curl "${curl_args[@]}" --get "${endpoint%/}/select/logsql/query" \
+  --data-urlencode "query=${query}" \
+  --data-urlencode "limit=${limit}" \
+  --data-urlencode "start=${since}"
