@@ -566,17 +566,14 @@ func (s *sGateway) Webhook(ctx context.Context, key string, body []byte, secret 
 			g.Log().Warningf(ctx, "TG链路 gateway_webhook_submit_failed key:%s updateId:%d config:%s parse:%s submit:%s total:%s err:%+v", key, update.ID, configDuration, parseDuration, submitDuration, time.Since(startedAt), err)
 		}
 	} else {
-		// Channel posts are durable downstream queue work. Return the Telegram
-		// webhook response immediately so slow collection/DB work cannot block
-		// Telegram retries or user-facing callbacks.
-		asyncCtx := context.WithoutCancel(ctx)
-		asyncKey := strings.TrimSpace(key)
-		asyncUpdate := update
-		go func() {
-			if asyncErr := s.submitUpdate(asyncCtx, asyncKey, &asyncUpdate); asyncErr != nil {
-				g.Log().Warningf(asyncCtx, "TG链路 gateway_webhook_async_submit_failed key:%s updateId:%d err:%+v", asyncKey, asyncUpdate.ID, asyncErr)
-			}
-		}()
+		// Channel posts only need a bounded durable enqueue here. The downstream
+		// collection/DB work remains in the queue worker, while enqueue latency is
+		// capped so a burst cannot exhaust Web's scheduler or proxy connections.
+		submitStartedAt := time.Now()
+		enqueueCtx, cancel := context.WithTimeout(ctx, tgGatewayEnqueueTimeout)
+		err = s.submitUpdate(enqueueCtx, strings.TrimSpace(key), &update)
+		cancel()
+		submitDuration = time.Since(submitStartedAt)
 	}
 	if err != nil && updateNeedsImmediateDispatch(&update) {
 		result = "failed"
