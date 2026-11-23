@@ -352,6 +352,17 @@ func telegramUnknownAttemptRecoveryAction(attempt telegramDeliveryAttempt, audit
 	if attempt.Status != telegramAttemptStatusRetryWait {
 		return telegramUnknownAttemptReconcile
 	}
+	// Verification is a dependent phase: when the display is already
+	// durably confirmed and the verify request produced no response/audit
+	// message after the bounded webhook window, retry the verify phase under
+	// the global unknown retry limit. Otherwise a single interrupted verify
+	// attempt can leave the profile permanently display-only.
+	if attempt.Phase == "verify" &&
+		auditCount == 0 &&
+		attempt.ResponseReceived == 0 &&
+		attempt.ConfirmedCount == 0 {
+		return telegramUnknownAttemptRetry
+	}
 	if auditCount > 0 || attempt.ResponseReceived != 0 || attempt.ConfirmedCount > 0 ||
 		strings.TrimSpace(attempt.ErrorMessage) == "" || isTelegramAmbiguousDeliveryError(errors.New(attempt.ErrorMessage)) {
 		return telegramUnknownAttemptReconcile
