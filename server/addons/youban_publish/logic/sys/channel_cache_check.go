@@ -38,9 +38,6 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	if in == nil || in.TgAccountId <= 0 {
 		return nil, gerror.New("请选择TG账号")
 	}
-	if err = s.refreshChannelCacheBeforeCheck(ctx, account.TenantId, in.TgAccountId); err != nil {
-		return nil, err
-	}
 	checkCtx, cancelCheck := context.WithTimeout(ctx, 40*time.Second)
 	res, err = s.checkAdminChannelBots(checkCtx, in, account.TenantId, true)
 	cancelCheck()
@@ -59,6 +56,7 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 }
 
 func (s *sSysPublish) refreshChannelCacheBeforeCheck(ctx context.Context, tenantId, tgAccountId int64) error {
+	collectorservice.AccountRuntime().Refresh()
 	task, err := collectorservice.AccountTasks().SubmitAndWait(ctx, &collectorin.AccountTaskSubmit{
 		TenantID:    tenantId,
 		AccountID:   tgAccountId,
@@ -102,26 +100,17 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	if err := s.ensureBotsBelongTenant(ctx, in.BotIds, tenantId); err != nil {
 		return nil, err
 	}
-	cache, err := s.tgChannelCacheByChannelId(ctx, tenantId, in.TgAccountId, in.TargetChatId)
-	if err != nil {
-		return nil, err
-	}
 	res := &sysin.ChannelCheckModel{
-		Allowed:         1,
-		CanAddAdmin:     cache.CanAddAdmins,
-		CanAddBot:       cache.CanInviteUsers,
-		CanInviteUsers:  cache.CanInviteUsers,
-		ChannelTitle:    cache.ChannelTitle,
-		ChannelUsername: strings.TrimPrefix(cache.ChannelUsername, "@"),
-		Message:         "检测通过",
-		TargetChatId:    cache.ChannelId,
-		BotResults:      []*sysin.ChannelCheckBotModel{},
+		Allowed:      1,
+		Message:      "检测通过",
+		TargetChatId: normalizeTelegramChannelChatID(in.TargetChatId),
+		BotResults:   []*sysin.ChannelCheckBotModel{},
 	}
 	bots, err := s.channelCheckBots(ctx, in.BotIds, tenantId)
 	if err != nil {
 		return nil, err
 	}
-	chatID := telegramBotChatID(cache)
+	chatID := normalizeTelegramChannelChatID(in.TargetChatId)
 	needAttach := false
 	for _, botItem := range bots {
 		result := &sysin.ChannelCheckBotModel{
@@ -143,6 +132,19 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 		res.BotResults = append(res.BotResults, result)
 	}
 	if needAttach {
+		if err = s.refreshChannelCacheBeforeCheck(ctx, tenantId, in.TgAccountId); err != nil {
+			return nil, err
+		}
+		cache, cacheErr := s.tgChannelCacheByChannelId(ctx, tenantId, in.TgAccountId, in.TargetChatId)
+		if cacheErr != nil {
+			return nil, cacheErr
+		}
+		res.CanAddAdmin = cache.CanAddAdmins
+		res.CanAddBot = cache.CanInviteUsers
+		res.CanInviteUsers = cache.CanInviteUsers
+		res.ChannelTitle = cache.ChannelTitle
+		res.ChannelUsername = strings.TrimPrefix(cache.ChannelUsername, "@")
+		res.TargetChatId = cache.ChannelId
 		if cache.CanAddAdmins != 1 {
 			res.Allowed = 0
 			res.Message = "Bot 未加入频道或无发送权限，且当前 TG 账号没有添加管理员权限，无法添加 Bot"
@@ -165,7 +167,7 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	}
 	for _, item := range res.BotResults {
 		if item.CanSendMessage != 1 && tryAttachBot {
-			canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botMap[item.BotId], chatID)
+			canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botMap[item.BotId], normalizeTelegramChannelChatID(in.TargetChatId))
 			item.CanSendMessage = boolToInt(canSend)
 			item.CanDeleteMessages = boolToInt(canDelete)
 			item.InChannel = boolToInt(inChannel)
