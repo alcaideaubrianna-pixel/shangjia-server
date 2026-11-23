@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,8 +25,21 @@ type fapiHubClient struct {
 	model    string
 }
 
+const (
+	fapiHubHTTPTimeoutEnv     = "YOUBAN_PUBLISH_FAPIHUB_TIMEOUT_SECONDS"
+	fapiHubHTTPTimeoutDefault = 60 * time.Second
+)
+
+func fapiHubHTTPTimeout() time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv(fapiHubHTTPTimeoutEnv)))
+	if err != nil || seconds <= 0 {
+		return fapiHubHTTPTimeoutDefault
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 var fapiHubHTTPClient = &http.Client{
-	Timeout: 12 * time.Second,
+	Timeout: fapiHubHTTPTimeout(),
 	Transport: &http.Transport{
 		MaxIdleConns:        32,
 		MaxIdleConnsPerHost: 16,
