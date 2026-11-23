@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -141,22 +142,37 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	}
 	chatID := normalizeTelegramChannelChatID(in.TargetChatId)
 	needAttach := false
-	for _, botItem := range bots {
-		result := &sysin.ChannelCheckBotModel{
-			BotId:       botItem.Id,
-			BotName:     botItem.BotName,
-			BotUsername: strings.TrimPrefix(botItem.BotUsername, "@"),
-			Status:      "success",
-			Message:     "Bot 可发送消息",
+	results := make([]*sysin.ChannelCheckBotModel, len(bots))
+	var waitGroup sync.WaitGroup
+	for index, botItem := range bots {
+		waitGroup.Add(1)
+		go func(index int, botItem *sysin.BotModel) {
+			defer waitGroup.Done()
+			result := &sysin.ChannelCheckBotModel{
+				BotId:       botItem.Id,
+				BotName:     botItem.BotName,
+				BotUsername: strings.TrimPrefix(botItem.BotUsername, "@"),
+				Status:      "success",
+				Message:     "Bot 可发送消息",
+			}
+			canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botItem, chatID)
+			result.CanSendMessage = boolToInt(canSend)
+			result.CanDeleteMessages = boolToInt(canDelete)
+			result.InChannel = boolToInt(inChannel)
+			result.Message = message
+			if !canSend || !canDelete {
+				result.Status = "warning"
+			}
+			results[index] = result
+		}(index, botItem)
+	}
+	waitGroup.Wait()
+	for _, result := range results {
+		if result == nil {
+			continue
 		}
-		canSend, canDelete, inChannel, message := s.checkBotChannelMember(ctx, botItem, chatID)
-		result.CanSendMessage = boolToInt(canSend)
-		result.CanDeleteMessages = boolToInt(canDelete)
-		result.InChannel = boolToInt(inChannel)
-		result.Message = message
-		if !canSend || !canDelete {
+		if result.CanSendMessage != 1 || result.CanDeleteMessages != 1 {
 			needAttach = true
-			result.Status = "warning"
 		}
 		res.BotResults = append(res.BotResults, result)
 	}
