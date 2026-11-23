@@ -73,6 +73,22 @@ func profileFinalizeConcurrency() int {
 	return value
 }
 
+func profileMediaGroupDebounceDuration() time.Duration {
+	const envName = "YOUBAN_BOT_PROFILE_MEDIA_GROUP_DEBOUNCE"
+	if raw := strings.TrimSpace(os.Getenv(envName)); raw != "" {
+		if debounce, err := time.ParseDuration(raw); err == nil {
+			if debounce < 2*time.Second {
+				return 2 * time.Second
+			}
+			if debounce > time.Minute {
+				return time.Minute
+			}
+			return debounce
+		}
+	}
+	return profileMediaGroupDebounce
+}
+
 func acquireProfileFinalizeSlot(ctx context.Context) error {
 	profileFinalizeOnce.Do(func() {
 		profileFinalizeGate = make(chan struct{}, profileFinalizeConcurrency())
@@ -3726,7 +3742,7 @@ func (s *sSysBot) recoverPendingProfileMediaGroups(ctx context.Context) {
 			Where("status", profileSessionStatusActive).
 			Where("((step = ? AND (payload_json LIKE ? OR payload_json LIKE ? OR payload_json LIKE ?)) OR (step = ? AND expires_at > ? AND payload_json LIKE ?))", "waiting_verify", "%pendingVerify%", "%verificationSubmitted%true%", "%\"verifyMedia\":[{%", "waiting_display", now, "%pendingGroup%").
 			Where("payload_json NOT LIKE ?", "%verificationRecoveryBlocked%true%").
-			WhereLTE("updated_at", now.Add(-profileMediaGroupDebounce))
+			WhereLTE("updated_at", now.Add(-profileMediaGroupDebounceDuration()))
 		if afterId > 0 {
 			mod = mod.WhereGT("id", afterId)
 		}
@@ -4133,13 +4149,13 @@ func profileMediaGroupIdleWait(pending profilePendingMediaGroup, now time.Time) 
 		lastMessageAt = time.Unix(pending.CreatedAt, 0)
 	}
 	idle := now.Sub(lastMessageAt)
-	if idle >= profileMediaGroupDebounce {
+	if idle >= profileMediaGroupDebounceDuration() {
 		return 0
 	}
 	if idle < 0 {
-		return profileMediaGroupDebounce
+		return profileMediaGroupDebounceDuration()
 	}
-	return profileMediaGroupDebounce - idle
+	return profileMediaGroupDebounceDuration() - idle
 }
 
 func appendProfileGroupMedia(current []*publishsysin.MessageTemplateMediaInp, messageId int, incoming []*publishsysin.MessageTemplateMediaInp) []*publishsysin.MessageTemplateMediaInp {
