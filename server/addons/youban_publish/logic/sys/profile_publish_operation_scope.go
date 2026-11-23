@@ -273,6 +273,27 @@ func (s *sSysPublish) settleSupersededTelegramSendTx(ctx context.Context, tx gdb
 		return false, false, false, err
 	}
 	noEvidence := profileSupersededJobHasNoSendEvidence(current, len(attempts), messages+audit)
+	// A stale ownership callback can arrive after this same Job has already
+	// durably confirmed its display send. In that case the display evidence is
+	// the current operation's own evidence, not evidence of an obsolete sender.
+	// Keep the confirmed phase and make the Job immediately eligible to resume
+	// the verification step; converting it to unknown here strands the Job
+	// before a verification Attempt can be created.
+	if current.Status == JobStatusSending && current.SendPhase == telegramSendPhaseDisplayConfirmed &&
+		len(attempts) > 0 && messages+audit > 0 {
+		message := "当前TG任务展示资料已确认，恢复验证资料发送"
+		transition := telegramJobTransition{
+			From: []JobStatus{JobStatusSending}, To: JobStatusRetryWait,
+			SendPhases: []SendPhase{SendPhaseDisplayConfirmed}, SendPhase: jobPhase(SendPhaseDisplayConfirmed),
+			DispatchStatus: jobDispatch(DispatchStatusIdle), RetryDelay: 0,
+			Additional: g.Map{"last_dispatch_error": message},
+		}
+		affected, err := s.transitionTelegramJobsTx(ctx, tx, []int64{current.Id}, transition)
+		if err != nil || affected == 0 {
+			return false, false, false, err
+		}
+		return false, true, true, nil
+	}
 	if current.Status == JobStatusSuperseded {
 		return noEvidence, false, false, nil // Retry only an already safe outbox close.
 	}
