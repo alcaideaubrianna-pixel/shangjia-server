@@ -617,6 +617,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			displaySendCtx, cancelDisplaySend := context.WithTimeout(ctx, telegrambudget.Display(ctx))
 			displaySendCtx = telegramPublishTraceContext(displaySendCtx, job.Id, g.Map{"attemptId": attempt.Id})
 			displaySendStartedAt := time.Now()
+			s.appendTelegramJobLog(ctx, job, "publish", "api_started", fmt.Sprintf(
+				"Telegram API开始请求 phase:display attemptId:%d method:sendMediaGroup mediaCount:%d chat:%s",
+				attempt.Id, len(displaySendMedia), job.TargetChatId))
 			step = beginTelegramPublishStage(displaySendCtx, "display.api_send", g.Map{"attemptId": attempt.Id, "mediaCount": len(displayMedia)})
 			messages, err = s.sendTelegramDisplayPart(displaySendCtx, bot, job.TargetChatId, displayCaption, displaySendMedia)
 			step.End(err, g.Map{"messageIds": telegramSentMessageIDs(messages), "messageCount": len(messages)})
@@ -624,6 +627,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			displaySendDuration := time.Since(displaySendStartedAt)
 			observeTelegramMediaSend(ctx, &job, "display", err, displaySendDuration)
 			g.Log().Info(ctx, "TG展示资料Bot发送结束", g.Map{"event": "telegram_bot_send", "purpose": "display", "transport": "bot", "profileId": job.ProfileId, "operationNo": job.OperationNo, "stageTimeoutMs": telegrambudget.Display(ctx).Milliseconds(), "job_id": job.Id, "attempt_id": attempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(displayMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": displaySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(messages), "error": telegramPublishLogError(err)})
+			s.appendTelegramJobLog(ctx, job, "publish", "api_finished", fmt.Sprintf(
+				"Telegram API请求结束 phase:display attemptId:%d durationMs:%d responseReceived:%t messageIds:%s error:%s",
+				attempt.Id, displaySendDuration.Milliseconds(), len(messages) > 0, telegramSentMessageIDs(messages), telegramPublishLogError(err)))
 			if err != nil {
 				if canceled, cancelErr := recordCanceledSendOutcome(ctx, job, attempt, messages, err); cancelErr != nil {
 					return cancelErr
@@ -660,6 +666,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 			step = beginTelegramPublishStage(ctx, "display.confirm_api_success", g.Map{"attemptId": attempt.Id, "messageIds": telegramSentMessageIDs(messages)})
 			err = s.confirmTelegramAPISuccess(ctx, job, attempt, messages)
 			step.End(err, g.Map{"apiConfirmed": true, "localCommitted": err == nil, "waitForWebhook": false})
+			s.appendTelegramJobLog(ctx, job, "publish", "projection_finished", fmt.Sprintf(
+				"Telegram响应本地投影结束 phase:display attemptId:%d messageIds:%s committed:%t error:%s",
+				attempt.Id, telegramSentMessageIDs(messages), err == nil, telegramPublishLogError(err)))
 			if err != nil {
 				return gerror.Wrap(errTelegramRemoteConfirmed, err.Error())
 			}
@@ -704,6 +713,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifySendCtx, cancelVerifySend := context.WithTimeout(ctx, telegrambudget.Verify(ctx))
 	verifySendCtx = telegramPublishTraceContext(verifySendCtx, job.Id, g.Map{"attemptId": verifyAttempt.Id})
 	verifySendStartedAt := time.Now()
+	s.appendTelegramJobLog(ctx, job, "publish", "api_started", fmt.Sprintf(
+		"Telegram API开始请求 phase:verify attemptId:%d method:sendVideo mediaCount:%d chat:%s",
+		verifyAttempt.Id, len(verifyMedia), job.TargetChatId))
 	step = beginTelegramPublishStage(verifySendCtx, "verify.api_send", g.Map{"attemptId": verifyAttempt.Id, "mediaCount": len(verifyMedia)})
 	verifyMessages, err := s.sendTelegramVerifyPart(verifySendCtx, bot, job.TargetChatId, verifyCaption, verifyMedia)
 	step.End(err, g.Map{"messageIds": telegramSentMessageIDs(verifyMessages), "messageCount": len(verifyMessages)})
@@ -711,6 +723,9 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	verifySendDuration := time.Since(verifySendStartedAt)
 	observeTelegramMediaSend(ctx, &job, "verify", err, verifySendDuration)
 	g.Log().Info(ctx, "TG验证资料Bot发送结束", g.Map{"event": "telegram_bot_send", "purpose": "verify", "transport": "bot", "profileId": job.ProfileId, "operationNo": job.OperationNo, "stageTimeoutMs": telegrambudget.Verify(ctx).Milliseconds(), "job_id": job.Id, "attempt_id": verifyAttempt.Id, "bot_id": job.BotId, "account_id": job.AccountId, "channel_id": job.ChannelId, "target_chat_id": job.TargetChatId, "media_count": len(verifyMedia), "send_mode": "bot", "retry_count": job.RetryCount, "duration": verifySendDuration.Milliseconds(), "error_type": telegramSendErrorType(err), "error_code": telegramSendErrorCode(err), "message_ids": telegramSentMessageIDs(verifyMessages), "error": telegramPublishLogError(err)})
+	s.appendTelegramJobLog(ctx, job, "publish", "api_finished", fmt.Sprintf(
+		"Telegram API请求结束 phase:verify attemptId:%d durationMs:%d responseReceived:%t messageIds:%s error:%s",
+		verifyAttempt.Id, verifySendDuration.Milliseconds(), len(verifyMessages) > 0, telegramSentMessageIDs(verifyMessages), telegramPublishLogError(err)))
 	if err != nil {
 		if canceled, cancelErr := recordCanceledSendOutcome(ctx, job, verifyAttempt, verifyMessages, err); cancelErr != nil {
 			return cancelErr

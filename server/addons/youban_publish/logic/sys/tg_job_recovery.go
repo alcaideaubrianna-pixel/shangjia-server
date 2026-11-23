@@ -853,6 +853,9 @@ func (s *sSysPublish) recoverStaleSendingTelegramAttempts(ctx context.Context, l
 		}
 		attempt.Status = telegramAttemptStatusWaiting
 		s.projectTelegramDeliveryAttempt(ctx, attempt, "发送进程中断，等待Webhook或协议号对账")
+		s.appendTelegramJobLog(ctx, telegramJobRecord{Id: attempt.JobId}, "recovery", "attempt_interrupted", fmt.Sprintf(
+			"发送Attempt超时恢复为待对账 attemptId:%d phase:%s webhookDeadline:%s",
+			attempt.Id, attempt.Phase, deadline.String()))
 		if _, updateErr = s.enqueueTelegramAttemptTimeout(ctx, attempt.Id, 0); updateErr != nil {
 			g.Log().Warningf(ctx, "投递中断TG Attempt对账失败 attemptId:%d err:%+v", attempt.Id, updateErr)
 		}
