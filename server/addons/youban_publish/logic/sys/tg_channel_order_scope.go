@@ -65,7 +65,7 @@ func telegramChannelPendingCleanupSQL(alias string) string {
 	}
 	// A pending cleanup marker stays durable until the cleanup worker resolves it.
 	// Send admission narrows terminal cleanup to the same profile.
-	return fmt.Sprintf("(%stimeout_cleanup_at IS NOT NULL OR (%ssend_phase='cleanup_processing' AND %sstatus NOT IN ('sent','failed','superseded')))", p, p, p)
+	return fmt.Sprintf("((%stimeout_cleanup_at IS NOT NULL AND %sstatus NOT IN ('sent','superseded')) OR (%ssend_phase='cleanup_processing' AND %sstatus NOT IN ('sent','failed','superseded')))", p, p, p, p)
 }
 
 func telegramChannelStartedJobSQL(alias string) string {
@@ -89,7 +89,8 @@ func telegramChannelOrderScopeSQL(alias string, job telegramJobRecord) (string, 
 }
 
 func telegramChannelJobPendingCleanup(job telegramJobRecord) bool {
-	return job.TimeoutCleanupAt != nil || (job.SendPhase == "cleanup_processing" && !job.Status.IsTerminal())
+	return (job.TimeoutCleanupAt != nil && job.Status != telegramJobStatusSent && job.Status != telegramJobStatusSuperseded) ||
+		(job.SendPhase == "cleanup_processing" && !job.Status.IsTerminal())
 }
 
 func telegramChannelJobOwnsOrder(job telegramJobRecord) bool {
