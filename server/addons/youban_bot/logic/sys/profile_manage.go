@@ -44,7 +44,9 @@ const (
 
 	telegramTextMessageMaxChars = 4096
 	profileCreateMaxMediaBytes  = 100 * 1024 * 1024
-	profileMediaGroupDebounce   = 2 * time.Second
+	// Telegram albums can arrive over several seconds when the bot is under
+	// load. Keep the group open long enough to collect all album updates.
+	profileMediaGroupDebounce   = 15 * time.Second
 	profileSessionTimeout       = 6 * time.Minute
 	profileProcessingTimeout    = 2 * time.Minute
 	profileMediaGroupCacheTTL   = 10 * time.Minute
