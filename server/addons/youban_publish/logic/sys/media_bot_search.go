@@ -325,6 +325,14 @@ func botMediaCandidateQueryTimeout(ctx context.Context) time.Duration {
 	return scanconfig.QueryTimeout(ctx)
 }
 
+func botMediaColdItemTimeoutDuration(ctx context.Context) time.Duration {
+	seconds := g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.coldItemTimeoutSeconds", int(botMediaColdItemTimeout/time.Second)).Int()
+	if seconds <= 0 || seconds > 120 {
+		seconds = int(botMediaColdItemTimeout / time.Second)
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func loadBotMediaSearchCandidates(ctx context.Context, fingerprints []*mediaFingerprint, loader func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
 	unique := uniqueBotMediaFingerprints(fingerprints)
 	return loadUniqueBotMediaSearchCandidates(ctx, unique, loader)
@@ -402,7 +410,7 @@ func loadBotMediaColdFingerprints(ctx context.Context, traceId string, items []*
 				return nil
 			}
 			startedAt := time.Now()
-			itemCtx, cancelItem := context.WithTimeout(groupCtx, botMediaColdItemTimeout)
+			itemCtx, cancelItem := context.WithTimeout(groupCtx, botMediaColdItemTimeoutDuration(groupCtx))
 			itemCtx = scantrace.With(itemCtx, g.Map{"requestId": gctx.CtxId(ctx), "queryId": traceId, "itemIndex": index})
 			finish := scantrace.Begin(itemCtx, "fingerprint.cold")
 			fingerprint, cacheHit, err := loader(itemCtx, item.FileUniqueId, item.FileUrl)
