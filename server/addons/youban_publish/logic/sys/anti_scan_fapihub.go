@@ -24,7 +24,7 @@ type fapiHubClient struct {
 }
 
 var fapiHubHTTPClient = &http.Client{
-	Timeout: 12 * time.Second,
+	Timeout: 60 * time.Second,
 	Transport: &http.Transport{
 		MaxIdleConns:        32,
 		MaxIdleConnsPerHost: 16,
