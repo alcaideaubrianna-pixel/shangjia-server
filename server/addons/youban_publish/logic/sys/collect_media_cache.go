@@ -163,15 +163,24 @@ func (s *sSysPublish) prepareCollectMediaAsset(ctx context.Context, event gdb.Re
 	}
 	var cached gdb.Record
 	var err error
-	cached, err = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
+	query := pdao.YoubanPublishCollectEventMedia.Ctx(ctx).
 		Where("tenant_id", event["tenant_id"].Int64()).
 		Where("REPLACE(source_chat_id, '-100', '') = REPLACE(?, '-100', '')", event["source_chat_id"].String()).
 		Where("source_message_id", event["source_message_id"].Int64()).
 		Where("media_type", collectPublishMediaType(item.Type)).
 		Where("event_id <>", event["id"].Int64()).
 		Where("cache_status", collectMediaCacheReady).
-		Where("(file_url <> '' OR storage_path <> '')").
-		OrderAsc("id").One()
+		Where("(file_url <> '' OR storage_path <> '')")
+	if strings.TrimSpace(event["source_grouped_id"].String()) != "" {
+		// Album messages can share source_message_id. Reuse is safe only when
+		// the exact Telegram file identity matches the current item.
+		fileID := strings.TrimSpace(item.FileId)
+		if fileID == "" {
+			return item, nil
+		}
+		query = query.Where("source_file_id", fileID)
+	}
+	cached, err = query.OrderAsc("id").One()
 	if err != nil {
 		return item, gerror.Wrap(err, "查找同消息媒体复用记录失败")
 	}
@@ -1367,7 +1376,10 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取Bot媒体下载网络配置失败")
 	}
-	cacheSource := fmt.Sprintf("bot:%d:%s", botId, firstNonEmpty(file.FileUniqueID, fileID))
+	// file_id is the only stable download input for this request. Do not use
+	// file_unique_id as the local cache identity because a faulty gateway
+	// response must not make different file IDs share one cache file.
+	cacheSource := fmt.Sprintf("bot:%d:file:%s", botId, fileID)
 	// 跨 media-worker 实例串行化同一 Bot 媒体的首次下载，避免多个 source 并发 miss 后重复访问 Telegram。
 	// Bot API 的 file_unique_id 在不同网关/媒体类型下可能缺失或不一致；
 	// file_id 才是当前下载任务的稳定入口，必须用于跨实例锁和身份缓存。

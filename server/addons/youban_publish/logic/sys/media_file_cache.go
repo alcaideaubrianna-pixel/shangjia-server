@@ -411,8 +411,18 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		if downloader == nil {
 			downloader = downloadMediaFileCache
 		}
-		if err := downloader(ctx, source, filePath); err != nil {
+		partPath := fmt.Sprintf("%s.part.%d", filePath, time.Now().UnixNano())
+		_ = os.Remove(partPath)
+		if err := downloader(ctx, source, partPath); err != nil {
+			_ = os.Remove(partPath)
 			return "", err
+		}
+		if !fileExists(partPath) {
+			return "", gerror.New("媒体下载完成但临时文件不存在")
+		}
+		if err := os.Rename(partPath, filePath); err != nil {
+			_ = os.Remove(partPath)
+			return "", gerror.Wrap(err, "提交媒体缓存文件失败")
 		}
 		if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 			return "", err
