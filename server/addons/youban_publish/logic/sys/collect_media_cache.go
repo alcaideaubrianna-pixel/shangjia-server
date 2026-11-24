@@ -946,6 +946,13 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 	if row == nil {
 		return false, nil
 	}
+	// A grouped album must bypass every historical cache-reuse path. Older
+	// cache rows may already contain polluted content for an individual
+	// source_file_id, so even exact file_id reuse is unsafe until the album is
+	// freshly downloaded and its members are verified together.
+	if strings.TrimSpace(row.SourceGroupedId) != "" {
+		return false, nil
+	}
 	// Telegram Bot file_id is stable for the same bot/media. Check this
 	// durable key before requiring source chat/message metadata and before the
 	// owner quota is acquired. Account gotd references are scoped by chat and
