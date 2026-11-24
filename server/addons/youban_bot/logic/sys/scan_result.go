@@ -62,7 +62,7 @@ func (s *sSysBot) searchScanMediaAndReply(ctx context.Context, botId int64, chat
 		Threshold:      12,
 	})
 	observeScanStage(ctx, botId, "fingerprint_search", searchStartedAt, err)
-	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
+	g.Log().Info(ctx, "Bot扫图搜索完成", g.Map{"traceId": traceId, "trace_id": traceId, "botId": botId, "accountId": account.AccountId, "durationMs": time.Since(searchStartedAt).Milliseconds(), "total": total, "err": err})
 	if err != nil {
 		step := scantrace.Begin(ctx, "reply.error")
 		defer func() { step(resultErr) }()

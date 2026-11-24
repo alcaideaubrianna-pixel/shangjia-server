@@ -164,7 +164,7 @@ func (s *sSysBot) acknowledgeScanMedia(ctx context.Context, botId int64, userId 
 		}
 	}
 	traceId := newScanTraceId()
-	g.Log().Info(ctx, "Bot扫图确认创建", g.Map{"traceId": traceId, "botId": botId, "userId": userId, "messageId": msg.ID})
+	g.Log().Info(ctx, "Bot扫图确认创建", g.Map{"traceId": traceId, "trace_id": traceId, "botId": botId, "userId": userId, "messageId": msg.ID})
 	if err := cache.Instance().Set(ctx, key, traceId, scanMediaGroupTTL); err != nil {
 		return "", err
 	}
@@ -200,7 +200,7 @@ func (s *sSysBot) acknowledgeScanMediaGroup(ctx context.Context, botId int64, us
 		}
 	}
 	traceId := newScanTraceId()
-	g.Log().Info(ctx, "Bot扫图批次确认创建", g.Map{"traceId": traceId, "botId": botId, "userId": userId, "batchId": batchId, "messageId": msg.ID})
+	g.Log().Info(ctx, "Bot扫图批次确认创建", g.Map{"traceId": traceId, "trace_id": traceId, "botId": botId, "userId": userId, "batchId": batchId, "messageId": msg.ID})
 	if err := cache.Instance().Set(ctx, ackKey, traceId, scanMediaGroupTTL); err != nil {
 		return "", err
 	}
@@ -310,7 +310,7 @@ func (s *sSysBot) finishScanMediaGroup(ctx context.Context, botId int64, userId 
 		}
 		_ = lock.Unlock(ctx)
 		if !claimed || len(pending.Items) == 0 {
-			g.Log().Info(ctx, "Bot扫图批次结束", g.Map{"traceId": scanTraceId(ctx), "batchId": groupId, "claimed": claimed, "itemCount": len(pending.Items)})
+			g.Log().Info(ctx, "Bot扫图批次结束", g.Map{"traceId": scanTraceId(ctx), "trace_id": scanTraceId(ctx), "batchId": groupId, "claimed": claimed, "itemCount": len(pending.Items)})
 			return
 		}
 		break

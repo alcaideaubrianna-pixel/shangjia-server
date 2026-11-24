@@ -4,7 +4,6 @@ package scantrace
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
@@ -50,14 +49,16 @@ func write(ctx context.Context, data g.Map, err error) {
 	if ctx.Err() != nil {
 		data["contextError"] = ctx.Err().Error()
 	}
-	body, marshalErr := json.Marshal(data)
-	if marshalErr != nil {
-		return
+	if traceID, ok := data["traceId"].(string); ok && traceID != "" {
+		// Keep the legacy camelCase field while adding the canonical field
+		// used by log search/indexing. The trace must be queryable without
+		// scanning the rendered log message.
+		data["trace_id"] = traceID
 	}
 	if err != nil || data["event"] == "slow" {
-		g.Log().Warningf(ctx, "Bot扫图链路 %s", body)
+		g.Log().Warning(ctx, "Bot扫图链路", data)
 	} else {
-		g.Log().Infof(ctx, "Bot扫图链路 %s", body)
+		g.Log().Info(ctx, "Bot扫图链路", data)
 	}
 }
 

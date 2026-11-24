@@ -100,7 +100,7 @@ func (scanMediaMessageHandler) Handle(ctx context.Context, bot *sSysBot, event *
 		return true, nil
 	}
 	ctx = withScanTrace(ctx, traceId)
-	g.Log().Info(ctx, "Bot扫图请求开始", g.Map{"traceId": traceId, "botId": event.BotId, "userId": userId, "batchId": batchId, "groupId": strings.TrimSpace(event.Msg.MediaGroupID), "messageId": event.Msg.ID})
+	g.Log().Info(ctx, "Bot扫图请求开始", g.Map{"traceId": traceId, "trace_id": traceId, "botId": event.BotId, "userId": userId, "batchId": batchId, "groupId": strings.TrimSpace(event.Msg.MediaGroupID), "messageId": event.Msg.ID})
 	if err = bot.beginScanMediaGroupItem(ctx, event.BotId, userId, batchId, event.Msg); err != nil {
 		return true, err
 	}
