@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"golang.org/x/text/unicode/norm"
 )
@@ -169,7 +171,7 @@ func renderCollectRuleText(event gdb.Record, content *collectContentResult, rule
 	for key, value := range event {
 		renderEvent[key] = value
 	}
-	renderEvent["raw_text"] = rawText
+	renderEvent["raw_text"] = gvar.New(rawText)
 	return (&sSysPublish{}).normalizeCollectMaterialText(context.Background(), renderEvent, rule, rawText)
 }
 
