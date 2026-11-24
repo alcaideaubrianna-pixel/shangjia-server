@@ -319,12 +319,18 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	// source_chat_id is an event/source identifier and is not a stable channel
 	// identity when several sources feed the same canonical channel.
 	var sourceChannelRows []struct {
-		SourceID  int64  `orm:"source_id"`
-		ChannelID string `orm:"channel_id"`
-		Status    string `orm:"status"`
+		ID        int64       `orm:"id"`
+		SourceID  int64       `orm:"source_id"`
+		ChannelID string      `orm:"channel_id"`
+		Status    string      `orm:"status"`
+		UpdatedAt *gtime.Time `orm:"updated_at"`
 	}
 	sourceChannelByID := make(map[int64][]string, len(sourceRows))
 	sourceChannelEnabled := make(map[string]bool)
+	sourceChannelSelected := make(map[string]struct {
+		updatedAt int64
+		id        int64
+	})
 	sourceChannelConflict := make(map[string]bool)
 	sourceIDs := make([]int64, 0, len(sourceRows))
 	for _, source := range sourceRows {
@@ -335,7 +341,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	if len(sourceRows) > 0 && len(sourceIDs) > 0 {
 		if err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
 			InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
-			Fields("ac.source_id,cc.telegram_chat_id AS channel_id,ac.status").
+			Fields("ac.id,ac.source_id,cc.telegram_chat_id AS channel_id,ac.status,ac.updated_at").
 			Where("ac.tenant_id", tenantID).Where("ac.account_id", accountID).
 			WhereIn("ac.source_id", sourceIDs).WhereNull("ac.deleted_at").WhereNull("cc.deleted_at").
 			Scan(&sourceChannelRows); err != nil {
@@ -351,7 +357,18 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 					}
 				}
 				sourceChannelByID[relation.SourceID] = append(sourceChannelByID[relation.SourceID], id)
-				sourceChannelEnabled[key] = botCollectChannelRelationEnabled(relation.Status)
+				updatedAt := int64(0)
+				if relation.UpdatedAt != nil {
+					updatedAt = relation.UpdatedAt.UnixNano()
+				}
+				selected, exists := sourceChannelSelected[key]
+				if !exists || updatedAt > selected.updatedAt || updatedAt == selected.updatedAt && relation.ID > selected.id {
+					sourceChannelSelected[key] = struct {
+						updatedAt int64
+						id        int64
+					}{updatedAt: updatedAt, id: relation.ID}
+					sourceChannelEnabled[key] = botCollectChannelRelationEnabled(relation.Status)
+				}
 			}
 		}
 	}
