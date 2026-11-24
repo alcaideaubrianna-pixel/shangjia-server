@@ -949,6 +949,13 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		return false, nil
 	}
 	if collectMediaCacheReuseQuarantined(row) {
+		g.Log().Warning(ctx, "采集媒体缓存已隔离，跳过历史复用并重新下载", g.Map{
+			"eventId":         row.EventId,
+			"mediaId":         row.Id,
+			"sourceFileId":    row.SourceFileId,
+			"sourceGroupedId": row.SourceGroupedId,
+			"errorMessage":    row.ErrorMessage,
+		})
 		return false, nil
 	}
 	// Telegram Bot file_id is stable for the same bot/media. Check this
