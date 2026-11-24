@@ -215,7 +215,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 			Fields("DISTINCT s.bot_id AS bot_id").
 			Where("s.tenant_id", tenantID).Where("s.account_id", accountID).
 			Where("s.bot_id > 0").WhereNull("s.deleted_at").
-			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id=s.id AND sr.tenant_id=? AND sr.rule_id=? AND sr.deleted_at IS NULL)", tenantID, ruleID).
+			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id=s.id AND sr.tenant_id=? AND sr.rule_id=?)", tenantID, ruleID).
 			Scan(&botRows); err != nil {
 			return nil, 0, gerror.Wrap(err, "读取采集规则机器人范围失败")
 		}

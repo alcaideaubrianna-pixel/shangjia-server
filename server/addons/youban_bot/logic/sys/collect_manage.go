@@ -447,14 +447,22 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
-	var ruleIDs []int64
+	var bindings []struct {
+		RuleId int64 `json:"ruleId"`
+	}
 	if err := g.DB().Model("hg_youban_publish_collect_source_rule").Ctx(ctx).
 		Fields("rule_id").
 		Where("source_id", id).
 		Where("tenant_id", account.TenantId).
 		OrderAsc("sort").
-		Scan(&ruleIDs); err != nil {
+		Scan(&bindings); err != nil {
 		return err
+	}
+	ruleIDs := make([]int64, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.RuleId > 0 {
+			ruleIDs = append(ruleIDs, binding.RuleId)
+		}
 	}
 	text := fmt.Sprintf("采集源：%s\n编号：%d\n状态：%s", row.Title, row.Id, map[bool]string{true: "运行中", false: "已暂停"}[row.CollectEnabled == 1])
 	buttons := [][]models.InlineKeyboardButton{
