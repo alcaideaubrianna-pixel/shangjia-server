@@ -653,7 +653,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		// Other source, rule, blacklist, and presentation conditions must not
 		// overwrite it.
 		row.Status = 2
-		if sourceRelationFound && sourceEnabled {
+		// Keep the display decision identical to the collection admission
+		// decision. A matched source without an account_channel relation uses
+		// the same default-enabled behavior as the collection pipeline.
+		if sourceFound && ((!sourceRelationFound && collectChannelStatusEnabled(defaultCollectChannelStatus())) || sourceEnabled) {
 			row.Status = 1
 		}
 		if row.Status == 2 {
