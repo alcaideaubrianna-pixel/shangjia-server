@@ -267,9 +267,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		deduplicated = append(deduplicated, row)
 	}
 	configured = deduplicated
+	configuredStatusByChannel := make(map[string]int, len(configured))
 	for _, row := range configured {
 		if row != nil {
 			row.IsBound = true
+			configuredStatusByChannel[canonicalCollectSourceChatID(row.ChannelId)] = row.Status
 		}
 	}
 	var disabledChannels []struct {
@@ -649,15 +651,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if sourceConflict && !sourceEnabled {
 			row.BlockReason = "同一采集源的频道关联状态冲突"
 		}
-		// The displayed enabled/disabled state is the account_channel decision.
-		// Other source, rule, blacklist, and presentation conditions must not
-		// overwrite it.
-		row.Status = 2
-		// Keep the display decision identical to the collection admission
-		// decision. A matched source without an account_channel relation uses
-		// the same default-enabled behavior as the collection pipeline.
-		if sourceFound && ((!sourceRelationFound && collectChannelStatusEnabled(defaultCollectChannelStatus())) || sourceEnabled) {
-			row.Status = 1
+		// This list displays the channel's status inside the current suffix
+		// rule. Collection authorization is a separate account_channel concern.
+		row.Status = 1
+		if configuredStatus, exists := configuredStatusByChannel[canonicalCollectSourceChatID(row.ChannelId)]; exists {
+			row.Status = configuredStatus
 		}
 		if row.Status == 2 {
 			g.Log().Info(ctx, "BOT频道有效状态判定为禁用", g.Map{
