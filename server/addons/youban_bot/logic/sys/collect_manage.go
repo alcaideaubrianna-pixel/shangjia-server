@@ -460,11 +460,9 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 	buttons := [][]models.InlineKeyboardButton{
 		{{Text: "采集配置", CallbackData: fmt.Sprintf("cm:config:%d", id)}},
 	}
-	if row.SourceType == "bot" {
-		for _, ruleID := range ruleIDs {
-			if ruleID > 0 {
-				buttons = append(buttons, []models.InlineKeyboardButton{{Text: "采集频道后缀", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
-			}
+	for _, ruleID := range ruleIDs {
+		if ruleID > 0 {
+			buttons = append(buttons, []models.InlineKeyboardButton{{Text: "采集频道后缀", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
 		}
 	}
 	buttons = append(buttons,
