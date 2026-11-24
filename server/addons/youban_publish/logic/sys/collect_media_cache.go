@@ -1370,7 +1370,6 @@ func (s *sSysPublish) downloadBotTelegramMediaWithToken(ctx context.Context, bot
 		return nil, gerror.Wrapf(err, "读取Bot媒体文件信息失败，已尝试%d次", resolved.Attempts)
 	}
 	observeTelegramBotGetFile(ctx, endpoint, "success", time.Since(getFileStartedAt))
-	file := resolved.File
 	remoteSource := resolved.URL
 	conf, err := service.SysConfig().GetTelegram(ctx)
 	if err != nil {
