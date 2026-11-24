@@ -1872,7 +1872,7 @@ func collectOptionalRecordScanSucceeded(err error) bool {
 }
 
 func botCollectChannelRelationEnabled(status string) bool {
-	return strings.EqualFold(strings.TrimSpace(status), sysin.CollectAccountChannelEnabled)
+	return collectChannelStatusEnabled(status)
 }
 
 func (s *sSysPublish) ingestCollectorAccountDelivery(ctx context.Context, delivery *collectorin.CollectorDelivery) error {

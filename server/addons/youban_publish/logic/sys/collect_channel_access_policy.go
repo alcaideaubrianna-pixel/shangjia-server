@@ -36,6 +36,10 @@ type collectChannelAccessPolicyDecision struct {
 	RelationKey string
 }
 
+func collectChannelStatusEnabled(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), sysin.CollectAccountChannelEnabled)
+}
+
 func decideCollectChannelAccess(in collectChannelAccessPolicyInput) collectChannelAccessPolicyDecision {
 	key := collectChannelAccessRelationKey(in.TenantID, in.AccountID, in.SourceID, in.CanonicalChat)
 	if !in.RelationExists {
