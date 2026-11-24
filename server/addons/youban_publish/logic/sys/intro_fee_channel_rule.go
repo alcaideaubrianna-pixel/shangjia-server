@@ -668,6 +668,23 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if row.BlockReason != "" {
 			row.Status = 2
 		}
+		if row.Status == 2 {
+			g.Log().Info(ctx, "BOT频道有效状态判定为禁用", g.Map{
+				"tenantId":              tenantID,
+				"accountId":             accountID,
+				"botId":                 botID,
+				"ruleId":                ruleID,
+				"channelId":             row.ChannelId,
+				"sourceFound":           sourceFound,
+				"sourceEnabled":         sourceEnabled,
+				"sourceRelationFound":   sourceRelationFound,
+				"sourceRelationActive":  sourceRelationActive,
+				"sourceConflict":        sourceConflict,
+				"blacklisted":           row.Blacklisted,
+				"blockReason":           row.BlockReason,
+				"disabledByRuleChannel": disabledByChannel[canonicalCollectSourceChatID(row.ChannelId)],
+			})
+		}
 	}
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		filtered := configured[:0]
