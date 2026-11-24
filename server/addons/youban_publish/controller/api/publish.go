@@ -469,6 +469,14 @@ func (c *cPublishAdmin) ChannelCacheList(ctx context.Context, req *publish.Admin
 	return
 }
 
+func (c *cPublishAdmin) ChannelCacheAdd(ctx context.Context, req *publish.AdminChannelCacheAddReq) (*publish.AdminChannelCacheAddRes, error) {
+	item, err := service.SysPublish().AdminChannelCacheAdd(ctx, &req.ChannelCacheAddInp)
+	if err != nil {
+		return nil, err
+	}
+	return &publish.AdminChannelCacheAddRes{ChannelCacheModel: item}, nil
+}
+
 func (c *cPublishAdmin) ChannelCacheResolve(ctx context.Context, req *publish.AdminChannelCacheResolveReq) (res *publish.AdminChannelCacheResolveRes, err error) {
 	list, err := service.SysPublish().AdminChannelCacheResolve(ctx, &req.ChannelCacheResolveInp)
 	if err != nil {

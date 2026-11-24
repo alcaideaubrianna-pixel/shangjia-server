@@ -1776,6 +1776,11 @@ type ChannelCacheListInp struct {
 	CanAddAdmins    int      `json:"canAddAdmins" dc:"筛选账号可添加管理员：1是"`
 }
 
+type ChannelCacheAddInp struct {
+	TgAccountId int64  `json:"tgAccountId" v:"required|min:1#请选择TG账号"`
+	Link        string `json:"link" v:"required#请输入频道链接"`
+}
+
 func (in *ChannelCacheListInp) Filter(ctx context.Context) error {
 	_ = ctx
 	in.DisplayType = strings.TrimSpace(strings.ToLower(in.DisplayType))

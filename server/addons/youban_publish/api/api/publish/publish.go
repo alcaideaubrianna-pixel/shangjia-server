@@ -362,6 +362,15 @@ type AdminChannelCacheListReq struct {
 	sysin.ChannelCacheListInp
 }
 
+type AdminChannelCacheAddReq struct {
+	g.Meta `path:"/publish/admin/channel/cache/add" method:"post" tags:"上架插件管理端" summary:"通过链接加入频道"`
+	sysin.ChannelCacheAddInp
+}
+
+type AdminChannelCacheAddRes struct {
+	*sysin.ChannelCacheModel
+}
+
 type AdminChannelCacheListRes struct {
 	form.PageRes
 	List []*sysin.ChannelCacheModel `json:"list" dc:"频道缓存列表"`

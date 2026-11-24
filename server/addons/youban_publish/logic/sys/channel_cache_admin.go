@@ -3,17 +3,117 @@ package sys
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+func (s *sSysPublish) AdminChannelCacheAdd(ctx context.Context, in *sysin.ChannelCacheAddInp) (*sysin.ChannelCacheModel, error) {
+	account, err := s.ensureGroupPushCapability(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in == nil || in.TgAccountId <= 0 {
+		return nil, gerror.New("请选择TG账号")
+	}
+	if err = s.ensureTgAccountBelongsAccount(ctx, in.TgAccountId, account.TenantId, account.Id); err != nil {
+		return nil, err
+	}
+	link := strings.TrimSpace(in.Link)
+	channelID := ""
+	var result *tg.Channel
+	err = s.ExecuteTelegram(ctx, in.TgAccountId, func(ctx context.Context, client *telegram.Client) error {
+		api := client.API()
+		if strings.Contains(link, "/+") || strings.Contains(link, "/joinchat/") {
+			hash := link[strings.LastIndex(link, "/")+1:]
+			updates, err := api.MessagesImportChatInvite(ctx, strings.TrimSpace(hash))
+			if err != nil {
+				return gerror.Wrap(err, "加入私有频道失败")
+			}
+			if joined, ok := updates.(*tg.MessagesChatInviteJoinResultOk); ok {
+				result = channelFromUpdates(joined.Updates)
+			}
+		} else {
+			username := strings.TrimPrefix(link, "@")
+			if index := strings.Index(username, "t.me/"); index >= 0 {
+				username = username[index+len("t.me/"):]
+			}
+			username = strings.Trim(username, "/")
+			resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+			if err != nil {
+				return gerror.Wrap(err, "解析公开频道失败")
+			}
+			peer, ok := resolved.Peer.(*tg.PeerChannel)
+			if !ok {
+				return gerror.New("链接不是频道或群聊")
+			}
+			for _, chat := range resolved.Chats {
+				if channel, ok := chat.(*tg.Channel); ok && channel.ID == peer.ChannelID {
+					result = channel
+					break
+				}
+			}
+			if result == nil {
+				return gerror.New("未找到频道信息")
+			}
+			hash, _ := result.GetAccessHash()
+			updates, joinErr := api.ChannelsJoinChannel(ctx, &tg.InputChannel{ChannelID: result.ID, AccessHash: hash})
+			if joinErr != nil {
+				return gerror.Wrap(joinErr, "加入公开频道失败")
+			}
+			if joined, ok := updates.(*tg.MessagesChatInviteJoinResultOk); ok {
+				if joinedChannel := channelFromUpdates(joined.Updates); joinedChannel != nil {
+					result = joinedChannel
+				}
+			}
+		}
+		if result == nil {
+			return gerror.New("Telegram未返回频道信息")
+		}
+		channelID = normalizeTelegramChannelChatID(strconv.FormatInt(result.ID, 10))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || channelID == "" {
+		return nil, gerror.New("加入频道失败")
+	}
+	if err = s.upsertTgChannelCache(ctx, account.TenantId, in.TgAccountId, result, gtime.Now()); err != nil {
+		return nil, err
+	}
+	var item sysin.ChannelCacheModel
+	err = g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("tg_account_id", in.TgAccountId).Where("channel_id", channelID).Scan(&item)
+	return &item, err
+}
+
+func channelFromUpdates(updates tg.UpdatesClass) *tg.Channel {
+	switch value := updates.(type) {
+	case *tg.Updates:
+		for _, chat := range value.Chats {
+			if channel, ok := chat.(*tg.Channel); ok {
+				return channel
+			}
+		}
+	case *tg.UpdatesCombined:
+		for _, chat := range value.Chats {
+			if channel, ok := chat.(*tg.Channel); ok {
+				return channel
+			}
+		}
+	}
+	return nil
+}
 
 func (s *sSysPublish) AdminChannelCacheList(ctx context.Context, in *sysin.ChannelCacheListInp) (list []*sysin.ChannelCacheModel, totalCount int, err error) {
 	account, err := s.ensureGroupPushCapability(ctx)
