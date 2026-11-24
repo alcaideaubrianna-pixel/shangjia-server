@@ -375,6 +375,26 @@ func (s *sSysPublish) validateAIOpsReplayChannelApproval(ctx context.Context, te
 
 func (s *sSysPublish) previewAIOpsRepairTargets(ctx context.Context, action string, in *sysin.AIOpsRepairPlanInp, limit int) ([]int64, []int64, []int64, error) {
 	switch action {
+	case "repair_media_events":
+		profileIDs, err := s.resolveAIOpsRepairProfileIDs(ctx, in.ProfileIds, in.ProfileNos, limit)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(profileIDs) == 0 {
+			return uniqueIds(in.EventIds), nil, nil, nil
+		}
+		var rows []struct {
+			EventId int64 `json:"eventId"`
+		}
+		if err = g.DB().Model(pdao.YoubanPublishCollectDispatch.Table()).Ctx(ctx).
+			Fields("event_id").WhereIn("profile_id", profileIDs).WhereGT("event_id", 0).Scan(&rows); err != nil {
+			return nil, nil, nil, gerror.Wrap(err, "按资料编号读取采集事件失败")
+		}
+		eventIDs := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			eventIDs = append(eventIDs, row.EventId)
+		}
+		return uniqueIds(eventIDs), nil, profileIDs, nil
 	case "offline_profiles", "republish_profiles", "delete_profiles", "repair_profile_media":
 		ids, err := s.resolveAIOpsRepairProfileIDs(ctx, in.ProfileIds, in.ProfileNos, limit)
 		if err != nil {
@@ -738,7 +758,7 @@ func runAIOpsSourceReplayPlan(ctx context.Context, planID string, execute func(c
 
 func isAsyncAIOpsProfileAction(action string) bool {
 	switch action {
-	case "offline_profiles", "republish_profiles", "delete_profiles", "repair_profile_media":
+	case "offline_profiles", "republish_profiles", "delete_profiles", "repair_profile_media", "repair_media_events":
 		return true
 	default:
 		return false
@@ -747,7 +767,13 @@ func isAsyncAIOpsProfileAction(action string) bool {
 
 func (s *sSysPublish) runAIOpsProfilePlanAsync(planID string, payload aiOpsRepairPlanPayload) {
 	ctx := context.Background()
-	applied, failed := s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
+	var applied int
+	var failed []int64
+	if payload.Action == "repair_media_events" {
+		applied, failed, _ = RepairCollectMediaEvents(ctx, payload.EventIDs)
+	} else {
+		applied, failed = s.applyAIOpsProfilePlan(ctx, payload.Action, payload.ProfileIDs, payload.TenantID, payload.AccountID)
+	}
 	status, message := "completed", ""
 	if len(failed) > 0 {
 		status = "failed"
