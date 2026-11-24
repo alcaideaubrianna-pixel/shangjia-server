@@ -73,6 +73,34 @@ func RequeueCollectEventsBestEffort(ctx context.Context, eventIDs []int64) (int,
 	return processed, failed, nil
 }
 
+// RepairCollectMediaEvents rebuilds media without changing publish or review
+// state. It is used for historical cache corruption where normal event replay
+// must remain protected by its publication-state guards.
+func RepairCollectMediaEvents(ctx context.Context, eventIDs []int64) (int, []int64, error) {
+	eventIDs = uniqueIds(eventIDs)
+	processed := 0
+	failed := make([]int64, 0)
+	service := NewSysPublish()
+	for _, eventID := range eventIDs {
+		event, err := pdao.YoubanPublishCollectEvent.Ctx(ctx).WherePri(eventID).One()
+		if err != nil || event.IsEmpty() || event["material_role"].String() != collectMaterialRoleDisplay {
+			failed = append(failed, eventID)
+			continue
+		}
+		if _, err = service.cacheCollectEventStructuredMedia(ctx, event); err != nil {
+			failed = append(failed, eventID)
+			continue
+		}
+		if err = service.syncCollectEventMediaSnapshot(ctx, eventID); err != nil {
+			failed = append(failed, eventID)
+			continue
+		}
+		processed++
+	}
+	g.Log().Info(ctx, "历史采集媒体修复完成", g.Map{"processed": processed, "failed": len(failed)})
+	return processed, failed, nil
+}
+
 func (s *sSysPublish) completeTargetCollectEvent(ctx context.Context, payload collectProcessQueuePayload) error {
 	// Authorization and bounded parent/child restoration precede every media
 	// read/download. The returned records retain their persisted account IDs.

@@ -44,6 +44,7 @@ var aiOpsRepairActions = map[string]struct{}{
 	"republish_profiles":          {},
 	"delete_profiles":             {},
 	"repair_profile_media":        {},
+	"repair_media_events":         {},
 	"replay_bot_source_updates":   {},
 	aiOpsCollectWakeAction:        {},
 }
@@ -543,7 +544,7 @@ func (s *sSysPublish) previewAIOpsRepairEvents(ctx context.Context, action strin
 		model = model.Where("status", sysin.CollectEventStatusIgnored).
 			Where("material_role", collectMaterialRoleVerify).
 			Where("error_message", collectMaterialVerifyUnmatchedMessage)
-	case "requeue_events", "queue_verification":
+	case "requeue_events", "queue_verification", "repair_media_events":
 		model = model.Where("material_role", collectMaterialRoleDisplay)
 	}
 	rows, err := model.OrderAsc("id").Limit(limit + 1).All()
@@ -625,6 +626,8 @@ func (s *sSysPublish) AIOpsApplyRepairPlan(ctx context.Context, in *sysin.AIOpsR
 		result.Applied, result.Failed, err = s.applyIgnoredVerificationEvents(ctx, payload.EventIDs)
 	case "requeue_events":
 		result.Applied, result.Failed, err = RequeueCollectEventsBestEffort(ctx, payload.EventIDs)
+	case "repair_media_events":
+		result.Applied, result.Failed, err = RepairCollectMediaEvents(ctx, payload.EventIDs)
 	case "queue_verification":
 		result.Applied, err = s.AIOpsQueueCollectVerification(ctx, payload.EventIDs, false)
 	case "repair_missing_verification":
