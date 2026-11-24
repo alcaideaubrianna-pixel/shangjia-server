@@ -621,7 +621,7 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 		if row.Status != 1 {
 			status = "已禁用"
 		}
-		buttons = append(buttons, []models.InlineKeyboardButton{{Text: name + " · " + status, CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, row.Id, row.ChannelId)}})
+		buttons = append(buttons, []models.InlineKeyboardButton{{Text: name + " · " + status, CallbackData: fmt.Sprintf("cm:channel:%d:0:%s", ruleID, row.ChannelId)}})
 	}
 	nav := make([]models.InlineKeyboardButton, 0, 2)
 	if page > 1 {
