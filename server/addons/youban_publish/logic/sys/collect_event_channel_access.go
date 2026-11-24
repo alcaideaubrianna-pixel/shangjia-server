@@ -21,6 +21,7 @@ type collectEventChannelAccess struct {
 type collectAccountChannelRelationRow struct {
 	ID        int64  `json:"id"`
 	SourceID  int64  `json:"sourceId"`
+	ChannelPK int64  `json:"channelPk"`
 	ChannelID string `json:"channelId"`
 	Status    string `json:"status"`
 }
@@ -33,7 +34,7 @@ func loadCollectAccountChannelRelations(ctx context.Context, tenantID, accountID
 	var rows []collectAccountChannelRelationRow
 	err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
 		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
-		Fields("ac.id,ac.source_id,cc.telegram_chat_id AS channel_id,ac.status").
+		Fields("ac.id,ac.source_id,ac.channel_id AS channel_pk,cc.telegram_chat_id AS channel_id,ac.status").
 		Where("ac."+cols.TenantId, tenantID).Where("ac."+cols.AccountId, accountID).
 		WhereIn("ac."+cols.SourceId, sourceIDs).WhereNull("ac." + cols.DeletedAt).WhereNull("cc.deleted_at").
 		Scan(&rows)
@@ -48,17 +49,29 @@ func loadCollectAccountChannelRelation(ctx context.Context, tenantID, accountID,
 	if tenantID <= 0 || accountID <= 0 || sourceID <= 0 || len(channelIDs) == 0 {
 		return relation, gerror.New("读取频道采集授权参数不完整")
 	}
-	cols := pdao.YoubanPublishCollectAccountChannel.Columns()
-	err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-		Fields(cols.Id, cols.ChannelId, cols.SourceId, cols.Status).
-		Where(cols.TenantId, tenantID).Where(cols.AccountId, accountID).
-		Where(cols.SourceId, sourceID).WhereIn(cols.ChannelId, channelIDs).
-		WhereNull(cols.DeletedAt).
-		Limit(1).Scan(&relation)
-	if !collectOptionalRecordScanSucceeded(err) {
+	rows, err := loadCollectAccountChannelRelations(ctx, tenantID, accountID, []int64{sourceID})
+	if err != nil {
 		return relation, gerror.Wrap(err, "读取频道采集授权失败")
 	}
+	for _, row := range rows {
+		if row.SourceID != sourceID || !collectInt64SliceContains(channelIDs, row.ChannelPK) {
+			continue
+		}
+		relation.Id = row.ID
+		relation.ChannelId = row.ChannelPK
+		relation.Status = row.Status
+		break
+	}
 	return relation, nil
+}
+
+func collectInt64SliceContains(values []int64, target int64) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // A source can receive multiple channels. Its configured channel_id is never
