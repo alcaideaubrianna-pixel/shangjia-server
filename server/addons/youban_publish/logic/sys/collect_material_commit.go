@@ -225,86 +225,10 @@ func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Recor
 // back over the cleaned profile text.
 func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
 	rawText := authoritativeCollectRawText(event["raw_text"].String())
-	preserveNonFeeLines := func(candidate string) string {
-		headerPrefix := ""
-		if header := strings.TrimSpace(rule["header_markdown"].String()); header != "" {
-			headerPrefix = header + "\n\n"
-			if !strings.HasPrefix(candidate, headerPrefix) {
-				headerPrefix = ""
-			} else {
-				candidate = strings.TrimPrefix(candidate, headerPrefix)
-			}
-		}
-		preserved := preserveCollectNonFeeLinesWithFilter(rawText, candidate, func(line string) bool {
-			for _, value := range collectRuleStrings(rule, "delete_lines") {
-				if strings.TrimSpace(value) != "" && strings.TrimSpace(line) == strings.TrimSpace(value) {
-					return false
-				}
-			}
-			for _, value := range collectRuleStrings(rule, "delete_texts") {
-				if value != "" && strings.Contains(line, value) {
-					return false
-				}
-			}
-			for _, replacement := range collectRuleReplacements(rule) {
-				if strings.Contains(line, replacement.From) {
-					return false
-				}
-			}
-			return true
-		})
-		preserved = headerPrefix + preserved
-		if preserved != candidate {
-			g.Log().Warningf(ctx, "采集资料费用窗口外原文保护已触发 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(candidate)), len([]rune(preserved)))
-		}
-		return preserved
+	if rawText == "" {
+		rawText = authoritativeCollectRawText(text)
 	}
-	footer := strings.TrimSpace(rule["footer_markdown"].String())
-	footerSuffix := ""
-	if footer != "" {
-		candidate := "\n" + footer
-		if strings.HasSuffix(text, candidate) {
-			text = strings.TrimSuffix(text, candidate)
-			footerSuffix = candidate
-		}
-	}
-	// Re-apply all source rules at the persistence boundary. This protects
-	// retries/imports/merge paths that may provide the original caption.
-	if footerSuffix != "" && rule["truncate_intro_fee_enabled"].Bool() {
-		text = normalizeCollectRuleBodyWithoutTruncate(text, rule)
-	} else {
-		text = normalizeCollectRuleBody(text, rule)
-	}
-	if shouldDropCollectStandaloneCodeCaption(text, event["media_count"].Int()) {
-		text = ""
-	}
-	text += footerSuffix
-	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
-		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
-		text = applyCollectIntroFeeSuffix(text, amountText, suffix)
-		return preserveNonFeeLines(text)
-	}
-	if !rule["truncate_intro_fee_enabled"].Bool() {
-		return preserveNonFeeLines(text)
-	}
-	if footerSuffix != "" {
-		return preserveNonFeeLines(text)
-	}
-	// The rule engine appends user-configured footer text after cleaning the
-	// source body. When a footer is configured, do not re-truncate the final
-	// caption at this boundary; retry/merge records may not carry the footer
-	// field and would otherwise delete the user's appended text.
-	// Footer/追加文案 is intentionally user-authored and may itself contain
-	// the keyword. Only normalize the source body before the exact footer.
-	body := text
-	if footerSuffix != "" {
-		body = strings.TrimSuffix(text, footerSuffix)
-	}
-	cleaned := applyCollectIntroFeeTruncate(body) + footerSuffix
-	if cleaned != text {
-		g.Log().Infof(ctx, "采集资料提交前执行介绍费兜底清洗 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(text)), len([]rune(cleaned)))
-	}
-	return preserveNonFeeLines(cleaned)
+	return normalizeCollectTextInOrder(rawText, rule, event["media_count"].Int())
 }
 
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {

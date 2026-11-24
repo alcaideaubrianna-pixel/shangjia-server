@@ -191,6 +191,45 @@ func normalizeCollectRuleBody(text string, rule gdb.Record) string {
 	return applyCollectFeeScopedRules(text, rule, truncate)
 }
 
+// normalizeCollectTextInOrder is the single collection text pipeline.
+// Fee data is captured from the original text before any destructive rule runs.
+func normalizeCollectTextInOrder(rawText string, rule gdb.Record, mediaCount int) string {
+	lines := strings.Split(strings.ReplaceAll(rawText, "\r\n", "\n"), "\n")
+	body := make([]string, 0, len(lines))
+	feeLines := make([]string, 0, 2)
+	for _, line := range lines {
+		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			feeLine := line
+			if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
+				feeLine = applyCollectIntroFeeSuffix(line, rawText, suffix)
+			}
+			feeLines = append(feeLines, feeLine)
+			continue
+		}
+		body = append(body, line)
+	}
+	text := strings.Join(body, "\n")
+	if rule["truncate_intro_fee_enabled"].Bool() {
+		text = applyCollectLeadingMaterialTitleCleanup(text)
+	}
+	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
+	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
+	text = applyCollectReplacements(text, collectRuleReplacements(rule))
+	if len(feeLines) > 0 {
+		text = strings.TrimSpace(text + "\n" + strings.Join(feeLines, "\n"))
+	}
+	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
+		return ""
+	}
+	if header := strings.TrimSpace(rule["header_markdown"].String()); rule["header_enabled"].Int() == 1 && header != "" {
+		text = header + "\n\n" + text
+	}
+	if footer := strings.TrimSpace(rule["footer_markdown"].String()); rule["footer_enabled"].Int() == 1 && footer != "" {
+		text = strings.TrimSpace(text + "\n" + footer)
+	}
+	return text
+}
+
 // Fee lines and explicit profile numbers are content, not source title codes.
 func isCollectLeadingMaterialTitle(line string) bool {
 	normalized := normalizeCollectKeywordText(line)
