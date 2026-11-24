@@ -117,6 +117,14 @@ export function AccountDelete(params = {}) {
   return http.request({ url: '/youban_publish/publish/account/delete', method: 'POST', params });
 }
 
+export function AccountTransferPreview(params = {}) {
+  return http.request({ url: '/youban_publish/publish/admin/account/transferPreview', method: 'get', params });
+}
+
+export function AccountTransferProfiles(params = {}) {
+  return http.request({ url: '/youban_publish/publish/admin/account/transferProfiles', method: 'POST', params });
+}
+
 export function PublishRecordList(params = {}) {
   return http.request({ url: '/youban_publish/publish/record/list', method: 'get', params });
 }

@@ -629,7 +629,7 @@
 
 <script lang="ts" setup>
   import { computed, h, nextTick, onMounted, reactive, ref } from 'vue';
-  import { NButton, NPopover, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
+  import { NButton, NPopover, NSelect, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
   import AccountLoginLink from './components/account-login-link.vue';
   import ChannelMemberPanel from './components/channel-member-panel.vue';
   import ActivityPanel from './components/activity-panel.vue';
@@ -646,6 +646,8 @@
   import RelayChannelPanel from './components/relay-channel-panel.vue';
   import {
     AccountDelete,
+    AccountTransferPreview,
+    AccountTransferProfiles,
     AccountList,
     AccountResetPassword,
     AccountSave,
@@ -1652,10 +1654,55 @@
     });
   }
 
-  function deleteAccount(id: number) {
-    confirmDelete('确认删除该上架系统账号？', async () => {
-      await AccountDelete({ ids: [id] });
-      await reloadActiveTabData();
+  async function deleteAccount(id: number) {
+    const preview: any = await AccountTransferPreview({ fromAccountId: id });
+    const profileCount = Number(preview?.profileCount ?? preview?.data?.profileCount ?? 0);
+    if (profileCount === 0) {
+      confirmDelete('该账号没有资料，确认直接删除？', async () => {
+        await AccountDelete({ ids: [id] });
+        await reloadActiveTabData();
+      });
+      return;
+    }
+
+    const targetAccountId = ref<number | null>(null);
+    const accountResult: any = await AccountList({ page: 1, perPage: 1000 });
+    const availableAccounts = accountResult?.list || accountResult?.data?.list || [];
+    const targetAccounts = availableAccounts
+      .filter((row) => Number(row.id) > 0 && Number(row.id) !== id)
+      .map((row) => ({ label: `${row.nickname || row.username || '未命名账号'}（${row.id}）`, value: row.id }));
+    dialog.warning({
+      title: '账号存在资料',
+      content: () =>
+        h('div', {}, [
+          h('p', {}, `当前账号有 ${profileCount} 条资料，请选择处理方式。`),
+          h(NSelect, {
+            value: targetAccountId.value,
+            options: targetAccounts,
+            placeholder: '选择资料转移目标账号',
+            onUpdateValue: (value: number | null) => {
+              targetAccountId.value = value;
+            },
+          }),
+        ]),
+      positiveText: '转移资料并删除',
+      negativeText: '直接删除',
+      onPositiveClick: async () => {
+        if (!targetAccountId.value) {
+          message.error('请选择资料转移目标账号');
+          return false;
+        }
+        await AccountTransferProfiles({
+          fromAccountId: id,
+          toAccountId: targetAccountId.value,
+          deleteAfterTransfer: 1,
+        });
+        await reloadActiveTabData();
+      },
+      onNegativeClick: async () => {
+        await AccountDelete({ ids: [id] });
+        await reloadActiveTabData();
+      },
     });
   }
 
