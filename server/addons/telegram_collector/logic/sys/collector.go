@@ -38,7 +38,10 @@ import (
 
 const gatewayOwner = "telegram_collector"
 
-const mediaPipelineVersion = "v1"
+// v2 invalidates media identities created before the source-file provenance
+// fix. Old cache rows may contain polluted album content and must never be
+// reused by the corrected downloader.
+const mediaPipelineVersion = "v2"
 
 var collectorMeter = otel.Meter("hotgo/addons/telegram_collector")
 
