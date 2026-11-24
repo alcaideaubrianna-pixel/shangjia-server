@@ -18,6 +18,31 @@ type collectEventChannelAccess struct {
 	Allowed    bool
 }
 
+type collectAccountChannelRelationRow struct {
+	ID        int64  `json:"id"`
+	SourceID  int64  `json:"sourceId"`
+	ChannelID string `json:"channelId"`
+	Status    string `json:"status"`
+}
+
+func loadCollectAccountChannelRelations(ctx context.Context, tenantID, accountID int64, sourceIDs []int64) ([]collectAccountChannelRelationRow, error) {
+	if tenantID <= 0 || accountID <= 0 || len(sourceIDs) == 0 {
+		return nil, nil
+	}
+	cols := pdao.YoubanPublishCollectAccountChannel.Columns()
+	var rows []collectAccountChannelRelationRow
+	err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
+		InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
+		Fields("ac.id,ac.source_id,cc.telegram_chat_id AS channel_id,ac.status").
+		Where("ac."+cols.TenantId, tenantID).Where("ac."+cols.AccountId, accountID).
+		WhereIn("ac."+cols.SourceId, sourceIDs).WhereNull("ac." + cols.DeletedAt).WhereNull("cc.deleted_at").
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "读取频道采集关联失败")
+	}
+	return rows, nil
+}
+
 func loadCollectAccountChannelRelation(ctx context.Context, tenantID, accountID, sourceID int64, channelIDs []int64) (botCollectChannelRelation, error) {
 	var relation botCollectChannelRelation
 	if tenantID <= 0 || accountID <= 0 || sourceID <= 0 || len(channelIDs) == 0 {

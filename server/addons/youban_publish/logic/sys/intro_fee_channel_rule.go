@@ -318,11 +318,7 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 	// Resolve source ownership through account_channel -> canonical channel.
 	// source_chat_id is an event/source identifier and is not a stable channel
 	// identity when several sources feed the same canonical channel.
-	var sourceChannelRows []struct {
-		SourceID  int64  `orm:"source_id"`
-		ChannelID string `orm:"channel_id"`
-		Status    string `orm:"status"`
-	}
+	var sourceChannelRows []collectAccountChannelRelationRow
 	sourceChannelByID := make(map[int64][]string, len(sourceRows))
 	sourceChannelEnabled := make(map[string]bool)
 	sourceChannelConflict := make(map[string]bool)
@@ -333,13 +329,10 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		}
 	}
 	if len(sourceRows) > 0 && len(sourceIDs) > 0 {
-		if err := g.DB().Model(pdao.YoubanPublishCollectAccountChannel.Table()+" ac").Ctx(ctx).
-			InnerJoin(pdao.YoubanPublishCollectChannel.Table()+" cc", "cc.id=ac.channel_id AND cc.tenant_id=ac.tenant_id").
-			Fields("ac.source_id,cc.telegram_chat_id AS channel_id,ac.status").
-			Where("ac.tenant_id", tenantID).Where("ac.account_id", accountID).
-			WhereIn("ac.source_id", sourceIDs).WhereNull("ac.deleted_at").WhereNull("cc.deleted_at").
-			Scan(&sourceChannelRows); err != nil {
-			return nil, 0, gerror.Wrap(err, "读取采集源频道关联失败")
+		var err error
+		sourceChannelRows, err = loadCollectAccountChannelRelations(ctx, tenantID, accountID, sourceIDs)
+		if err != nil {
+			return nil, 0, err
 		}
 		for _, relation := range sourceChannelRows {
 			id := canonicalCollectSourceChatID(relation.ChannelID)
