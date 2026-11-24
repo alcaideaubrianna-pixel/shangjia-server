@@ -259,14 +259,6 @@ func (s *sSysPublish) AdminAccountTransferPreview(ctx context.Context, in *sysin
 		return nil, gerror.Wrap(err, "统计待转移资料失败")
 	}
 	res.TaskCount = res.ProfileCount
-	res.MediaCount, err = pdao.YoubanPublishMedia.Ctx(ctx).
-		Where(pdao.YoubanPublishMedia.Columns().TenantId, admin.TenantId).
-		Where(pdao.YoubanPublishMedia.Columns().AccountId, in.FromAccountId).
-		WhereNull(pdao.YoubanPublishMedia.Columns().DeletedAt).
-		Count()
-	if err != nil {
-		return nil, gerror.Wrap(err, "统计待转移媒体失败")
-	}
 	return res, nil
 }
 
@@ -299,22 +291,28 @@ func (s *sSysPublish) AdminAccountTransferProfiles(ctx context.Context, in *sysi
 	err = g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		mediaColumns := pdao.YoubanPublishMedia.Columns()
 		accountColumns := pdao.YoubanPublishAccount.Columns()
-		if _, e := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
+		profileResult, e := tx.Model(publishProfileStateTable).Safe().Ctx(ctx).
 			Where("tenant_id", admin.TenantId).
 			Where("account_id", in.FromAccountId).
 			WhereNull("deleted_at").
 			Data(g.Map{"account_id": in.ToAccountId, "updated_by": admin.Id, "updated_at": now}).
-			Update(); e != nil {
+			Update()
+		if e != nil {
 			return gerror.Wrap(e, "转移资料归属失败")
 		}
-		if _, e := tx.Model(pdao.YoubanPublishMedia.Table()).Safe().Ctx(ctx).
+		profileRows, _ := profileResult.RowsAffected()
+		res.TaskCount = int(profileRows)
+		mediaResult, e := tx.Model(pdao.YoubanPublishMedia.Table()).Safe().Ctx(ctx).
 			Where(mediaColumns.TenantId, admin.TenantId).
 			Where(mediaColumns.AccountId, in.FromAccountId).
 			WhereNull(mediaColumns.DeletedAt).
 			Data(g.Map{mediaColumns.AccountId: in.ToAccountId, mediaColumns.UpdatedBy: admin.Id, mediaColumns.UpdatedAt: now}).
-			Update(); e != nil {
+			Update()
+		if e != nil {
 			return gerror.Wrap(e, "转移上架媒体失败")
 		}
+		mediaRows, _ := mediaResult.RowsAffected()
+		res.MediaCount = int(mediaRows)
 		if in.DeleteAfterTransfer == 1 {
 			if _, e := tx.Model(pdao.YoubanPublishAccount.Table()).Safe().Ctx(ctx).
 				Where(accountColumns.Id, in.FromAccountId).
