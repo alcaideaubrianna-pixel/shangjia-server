@@ -83,6 +83,10 @@ export function ChannelList(params = {}) {
   return http.request({ url: '/youban_publish/publish/channel/list', method: 'get', params });
 }
 
+export function ChannelSave(params = {}) {
+  return http.request({ url: '/youban_publish/publish/admin/channel/save', method: 'POST', params });
+}
+
 export function GlobalAutoDeleteKeywordsView(params = {}) {
   return http.request(
     {

@@ -624,6 +624,13 @@
         /></n-form-item>
       </n-form>
     </n-modal>
+
+    <n-modal v-model:show="channelConfigVisible" preset="dialog" title="修改账户配置" positive-text="保存" negative-text="取消" @positive-click="saveChannelConfig">
+      <n-form :model="channelConfigForm" label-placement="left" label-width="110">
+        <n-form-item label="推送资料 BOT"><n-select v-model:value="channelConfigForm.botIds" multiple filterable :options="botOptions" /></n-form-item>
+        <n-form-item label="上架账户"><n-select v-model:value="channelConfigForm.tgAccountId" filterable :options="tgAccountOptions" /></n-form-item>
+      </n-form>
+    </n-modal>
   </div>
 </template>
 
@@ -663,6 +670,7 @@
     CloudResourceConfigSave,
     CloudResourceConfigView,
     ChannelList,
+    ChannelSave,
     TenantDelete,
     TenantList,
     TenantSave,
@@ -703,6 +711,8 @@
     { label: 'Pull', value: 'pull' },
     { label: 'Webhook', value: 'webhook' },
   ];
+  const botOptions = computed(() => bots.value.map((row) => ({ label: `${row.botName || row.botUsername || 'Bot'}（${row.id}）`, value: row.id })));
+  const tgAccountOptions = computed(() => tgAccounts.value.filter((row) => row.status === 'authorized' || row.status === 1).map((row) => ({ label: `${row.displayName || row.telegramUsername || 'TG账号'}（${row.id}）`, value: row.id })));
 
   const tenants = ref<any[]>([]);
   const accounts = ref<any[]>([]);
@@ -729,6 +739,8 @@
   const resetPasswordResultVisible = ref(false);
   const botModalVisible = ref(false);
   const tagModalVisible = ref(false);
+  const channelConfigVisible = ref(false);
+  const channelConfigForm = reactive({ id: 0, tgAccountId: null as number | null, botIds: [] as number[] });
 
   const tenantQuery = reactive({ keyword: '', status: 0 });
   const accountQuery = reactive({
@@ -1008,6 +1020,7 @@
     },
     { title: '状态', key: 'status', width: 100, render: (row) => renderStatus(row.status) },
     { title: '更新时间', key: 'updatedAt', width: 180 },
+    { title: '操作', key: 'actions', width: 150, render: (row) => actionButton('修改账户配置', () => openChannelConfig(row)) },
   ];
 
   const botColumns = [
@@ -1704,6 +1717,30 @@
         await reloadActiveTabData();
       },
     });
+  }
+
+  async function openChannelConfig(row: any) {
+    const [botResult, tgResult]: any[] = await Promise.all([
+      BotList({ ...botQuery, page: 1, perPage: 1000 }),
+      AdminTgAccountList({ ...tgAccountQuery, page: 1, perPage: 1000 }),
+    ]);
+    bots.value = botResult?.list || bots.value;
+    tgAccounts.value = tgResult?.list || tgAccounts.value;
+    channelConfigForm.id = row.id;
+    channelConfigForm.tgAccountId = row.tgAccountId || null;
+    channelConfigForm.botIds = Array.isArray(row.botIds) ? [...row.botIds] : row.botId ? [row.botId] : [];
+    channelConfigVisible.value = true;
+  }
+
+  async function saveChannelConfig() {
+    if (!channelConfigForm.tgAccountId) {
+      message.error('请选择上架账户');
+      return false;
+    }
+    await ChannelSave({ id: channelConfigForm.id, tgAccountId: channelConfigForm.tgAccountId, botIds: channelConfigForm.botIds });
+    message.success('账户配置已保存');
+    channelConfigVisible.value = false;
+    await loadChannels();
   }
 
   function deleteBot(id: number) {

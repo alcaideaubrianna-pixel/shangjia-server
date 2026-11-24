@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gotd/td/telegram"
+	"hotgo/internal/library/cache"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
 	"hotgo/internal/library/contexts"
@@ -221,7 +224,6 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		// 编辑频道配置时，以登录态账号可操作的原频道为准，不信任前端提交的归属字段。
 		// 这里仅允许修改 Bot、默认选中、上架端可见、循环上架、备注和状态等配置。
 		if existing != nil {
-			in.TgAccountId = existing.TgAccountId
 			in.ChannelTitle = existing.ChannelTitle
 			in.ChannelUsername = existing.ChannelUsername
 			in.TargetChatId = existing.TargetChatId
@@ -235,6 +237,11 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	in.TgAccountId = resolvedTgAccountId
 	if err = in.Filter(ctx); err != nil {
 		return err
+	}
+	if !isCreate && existing != nil && existing.TgAccountId != in.TgAccountId {
+		if err = s.verifyTgAccountChannelAdmin(ctx, in.TenantId, in.TgAccountId, in.TargetChatId); err != nil {
+			return err
+		}
 	}
 	vip, err := s.tenantVipStatus(ctx, in.TenantId)
 	if err != nil {
@@ -389,6 +396,41 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
 	s.refreshCollectSourceCache(ctx)
+	return nil
+}
+
+const channelAccountAdminCacheTTL = 5 * time.Minute
+
+func channelAccountAdminCacheKey(tenantID, tgAccountID int64, channelID string) string {
+	return fmt.Sprintf("youban_publish:channel_account_admin:%d:%d:%s", tenantID, tgAccountID, normalizeTelegramChannelChatID(channelID))
+}
+
+func (s *sSysPublish) verifyTgAccountChannelAdmin(ctx context.Context, tenantID, tgAccountID int64, channelID string) error {
+	key := channelAccountAdminCacheKey(tenantID, tgAccountID, channelID)
+	if value, err := cache.Instance().Get(ctx, key); err == nil && !value.IsNil() && value.Bool() {
+		return nil
+	}
+	verified := false
+	err := s.ExecuteTelegram(ctx, tgAccountID, func(ctx context.Context, client *telegram.Client) error {
+		return scanTgAccountChannelCachesWithClient(ctx, client, func(channels []*tgDialogCache) error {
+			for _, channel := range channels {
+				if channel != nil && normalizeTelegramChannelChatID(channel.ChannelId) == normalizeTelegramChannelChatID(channelID) && channel.CanAddAdmins == 1 {
+					verified = true
+					return nil
+				}
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return gerror.Wrap(err, "验证新TG账号频道管理员权限失败")
+	}
+	if !verified {
+		return gerror.New("新TG账号没有当前频道的管理员权限，不能切换上架账户")
+	}
+	if err = cache.Instance().Set(ctx, key, true, channelAccountAdminCacheTTL); err != nil {
+		return gerror.Wrap(err, "保存TG账号频道权限缓存失败")
+	}
 	return nil
 }
 
