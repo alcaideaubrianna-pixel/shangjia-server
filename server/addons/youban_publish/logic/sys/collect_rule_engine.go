@@ -155,69 +155,22 @@ func buildCollectRuleDecision(event gdb.Record, content *collectContentResult, r
 	}
 }
 
-// renderCollectRuleText applies only body transformations, without deciding
-// whether a new rule matches. Accepted dispatch retries use the same renderer
-// as new branches, so a changed precheck cannot replace their text with "".
+// renderCollectRuleText is the single rule-rendering entry point. Persistence
+// and review paths use the same normalizer with their current text snapshot.
 func renderCollectRuleText(event gdb.Record, content *collectContentResult, rule gdb.Record) string {
 	rawText := authoritativeCollectRawText(event["raw_text"].String())
-	mediaCount := event["media_count"].Int()
 	if content != nil {
 		rawText = authoritativeCollectRawText(content.RawText)
-		mediaCount = content.MediaCount
 	}
 	if strings.TrimSpace(rawText) == "" {
 		return ""
 	}
-	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
-	text := normalizeCollectRuleBody(rawText, rule)
-	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
-		text = ""
+	renderEvent := make(gdb.Record, len(event)+1)
+	for key, value := range event {
+		renderEvent[key] = value
 	}
-	// Keep evaluating suffix reconstruction even when truncation removed the
-	// entire body; the fee line itself must be restored from the pre-truncate text.
-	if strings.TrimSpace(text) == "" {
-		if introFeeSuffix == "" {
-			return ""
-		}
-		candidate := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
-		if strings.Contains(candidate, "\nKK") {
-			return ""
-		}
-		meaningful := false
-		feeSeen := false
-		for _, line := range strings.Split(strings.ReplaceAll(candidate, "\r\n", "\n"), "\n") {
-			line = strings.TrimSpace(line)
-			if collectFeeKeywordPattern.MatchString(line) {
-				feeSeen = true
-				continue
-			}
-			if feeSeen && (isCollectIntroFeeStandaloneSuffix(line) || collectShortTitleLine(line)) {
-				return ""
-			}
-			if line == "" || collectMaterialMetaLineRule.MatchString(line) {
-				continue
-			}
-			meaningful = true
-			break
-		}
-		if !meaningful {
-			return ""
-		}
-	}
-	if rule["header_enabled"].Int() == 1 && strings.TrimSpace(rule["header_markdown"].String()) != "" {
-		text = strings.TrimSpace(rule["header_markdown"].String()) + "\n\n" + text
-	}
-	if rule["footer_enabled"].Int() == 1 && strings.TrimSpace(rule["footer_markdown"].String()) != "" {
-		text = strings.TrimSpace(text + "\n" + strings.TrimSpace(rule["footer_markdown"].String()))
-	}
-	if introFeeSuffix != "" {
-		// Suffix reconstruction needs the amount from the cleaned source before
-		// truncation removes the original fee line.
-		amountText := normalizeCollectRuleBodyWithoutTruncate(authoritativeCollectRawText(rawText), rule)
-		text = applyCollectIntroFeeSuffix(text, amountText, introFeeSuffix)
-	}
-	text = preserveCollectCriticalProfileLines(rawText, text)
-	return text
+	renderEvent["raw_text"] = rawText
+	return (&sSysPublish{}).normalizeCollectMaterialText(context.Background(), renderEvent, rule, rawText)
 }
 
 func normalizeCollectRuleBodyWithoutTruncate(text string, rule gdb.Record) string {

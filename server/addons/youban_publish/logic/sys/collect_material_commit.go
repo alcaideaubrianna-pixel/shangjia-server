@@ -266,6 +266,11 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	} else {
 		text = normalizeCollectRuleBody(text, rule)
 	}
+	// Keep the standalone caption guard in the shared pipeline before adding
+	// configured headers, footers, or introduction-fee suffixes.
+	if shouldDropCollectStandaloneCodeCaption(text, event["media_count"].Int()) {
+		text = ""
+	}
 	text += footerSuffix
 	if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
 		amountText := normalizeCollectRuleBodyWithoutTruncate(rawText, rule)
