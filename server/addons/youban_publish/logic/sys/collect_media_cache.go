@@ -958,6 +958,12 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		})
 		return false, nil
 	}
+	// Album members must not reuse media rows from another collection event.
+	// The event-level cache has no trusted provenance version for historical
+	// rows, while the Bot file_id cache below still provides safe exact reuse.
+	if strings.TrimSpace(row.SourceGroupedId) != "" {
+		return false, nil
+	}
 	// Telegram Bot file_id is stable for the same bot/media. Check this
 	// durable key before requiring source chat/message metadata and before the
 	// owner quota is acquired. Account gotd references are scoped by chat and
