@@ -452,6 +452,7 @@ func (s *sSysPublish) approveCollectReview(ctx context.Context, reviewId int64, 
 	content.NormalizedText = normalizeCollectText(text)
 	content.TextHash = collectHash(content.NormalizedText)
 	content.DedupeKey = collectHash(content.NormalizedText + ":" + collectMediaSignature(content.Media))
+	text = renderCollectRuleText(event, content, rule)
 	profileId := dispatch["profile_id"].Int64()
 	if profileId <= 0 {
 		profileId, err = s.commitCollectMaterial(ctx, event, content, rule, text)

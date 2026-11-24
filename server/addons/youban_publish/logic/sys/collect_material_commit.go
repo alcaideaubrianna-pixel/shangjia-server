@@ -201,7 +201,6 @@ func telegramCollectorMediaKind(mediaType string) string {
 }
 
 func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult, rule gdb.Record, text string) (int64, error) {
-	text = s.normalizeCollectMaterialText(ctx, event, rule, text)
 	// Reject unchanged invalid input/config before costly media preparation.
 	if collectTitle(text) == "" {
 		return 0, gerror.New("采集资料标题为空")
