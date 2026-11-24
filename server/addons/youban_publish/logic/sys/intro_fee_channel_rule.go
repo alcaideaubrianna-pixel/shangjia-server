@@ -207,6 +207,22 @@ func (s *sSysPublish) introFeeChannelRuleCandidates(ctx context.Context, tenantI
 }
 
 func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Context, tenantID, accountID, ruleID, botID int64, keyword string, page, perPage int, includeCounts bool) ([]*sysin.IntroFeeChannelRuleItem, int, error) {
+	if botID <= 0 {
+		var botRows []struct {
+			BotID int64 `json:"botId"`
+		}
+		if err := g.DB().Model(publishCollectSourceTable+" s").Ctx(ctx).
+			Fields("DISTINCT s.bot_id AS bot_id").
+			Where("s.tenant_id", tenantID).Where("s.account_id", accountID).
+			Where("s.bot_id > 0").WhereNull("s.deleted_at").
+			Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id=s.id AND sr.tenant_id=? AND sr.rule_id=? AND sr.deleted_at IS NULL)", tenantID, ruleID).
+			Scan(&botRows); err != nil {
+			return nil, 0, gerror.Wrap(err, "读取采集规则机器人范围失败")
+		}
+		if len(botRows) == 1 {
+			botID = botRows[0].BotID
+		}
+	}
 	if page <= 0 {
 		page = 1
 	}
