@@ -514,7 +514,15 @@ func (s *sSysPublish) collectMediaNeedsOwner(ctx context.Context, event gdb.Reco
 		if row == nil || !collectEventMediaRowNeedsCache(event, row) {
 			continue
 		}
-		reusedSibling, siblingErr := s.reuseCollectMediaFromMessageSibling(ctx, row, siblings)
+		var reusedSibling bool
+		var siblingErr error
+		// A grouped message contains multiple media items with the same
+		// source_message_id. Reusing by message ID and media type can copy the
+		// first photo into every sibling. Grouped media may only reuse through
+		// the exact source_file_id/source_media_key paths below.
+		if strings.TrimSpace(row.SourceGroupedId) == "" {
+			reusedSibling, siblingErr = s.reuseCollectMediaFromMessageSibling(ctx, row, siblings)
+		}
 		if siblingErr != nil {
 			return true, siblingErr
 		}
@@ -953,6 +961,12 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		}
 	}
 	if strings.TrimSpace(row.SourceChatId) == "" || row.SourceMessageId <= 0 {
+		return false, nil
+	}
+	// Published-message reuse is keyed by source message ID. That identity is
+	// insufficient for Telegram albums because every photo shares the same
+	// source message ID. Never reuse a published asset for grouped media here.
+	if strings.TrimSpace(row.SourceGroupedId) != "" {
 		return false, nil
 	}
 	if reused, err := s.reusePublishedCollectMedia(ctx, row); reused || err != nil {

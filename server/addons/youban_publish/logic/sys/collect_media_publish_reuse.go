@@ -17,6 +17,9 @@ func (s *sSysPublish) reusePublishedCollectMedia(ctx context.Context, row *colle
 	if row == nil || row.TenantId <= 0 || row.SourceMessageId <= 0 {
 		return false, nil
 	}
+	if strings.TrimSpace(row.SourceGroupedId) != "" {
+		return false, nil
+	}
 	chatID := normalizeTelegramChannelChatID(row.SourceChatId)
 	if chatID == "" {
 		return false, nil
