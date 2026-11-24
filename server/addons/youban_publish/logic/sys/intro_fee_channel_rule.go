@@ -610,13 +610,11 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 				mappedKey := fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))
 				if mapped, exists := sourceChannelEnabled[mappedKey]; exists {
 					sourceRelationFound = true
-					active := source.Status == 1 && source.CollectEnabled == 1
-					sourceRelationActive = sourceRelationActive || active
-					sourceEnabled = sourceEnabled || active && mapped
+					sourceRelationActive = sourceRelationActive || mapped
+					sourceEnabled = sourceEnabled || mapped
 				} else if !matchedByBotCache {
 					// A BOT cache hit makes a channel visible, but it does not
 					// authorize collection until account_channel exists.
-					sourceEnabled = sourceEnabled || source.Status == 1 && source.CollectEnabled == 1
 				}
 				if sourceChannelConflict[fmt.Sprintf("%d:%s", source.SourceID, canonicalCollectSourceChatID(row.ChannelId))] {
 					sourceConflict = true
@@ -651,15 +649,12 @@ func (s *sSysPublish) introFeeChannelRuleCandidatesWithCounts(ctx context.Contex
 		if sourceConflict && !sourceEnabled {
 			row.BlockReason = "同一采集源的频道关联状态冲突"
 		}
-		row.Status = 1
-		// A manual disable only blocks when no rule-scoped source remains
-		// eligible. Do not let one source's disable shadow another source's
-		// allowed relation for the same canonical channel.
-		if disabledByChannel[canonicalCollectSourceChatID(row.ChannelId)] && !sourceEnabled {
-			row.BlockReason = "当前规则的频道采集已禁用"
-		}
-		if row.BlockReason != "" {
-			row.Status = 2
+		// The displayed enabled/disabled state is the account_channel decision.
+		// Other source, rule, blacklist, and presentation conditions must not
+		// overwrite it.
+		row.Status = 2
+		if sourceRelationFound && sourceEnabled {
+			row.Status = 1
 		}
 		if row.Status == 2 {
 			g.Log().Info(ctx, "BOT频道有效状态判定为禁用", g.Map{
