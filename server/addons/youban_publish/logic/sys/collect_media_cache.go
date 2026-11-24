@@ -919,6 +919,30 @@ func (s *sSysPublish) cacheCollectEventStructuredMedia(ctx context.Context, even
 	}
 	downloadWait.Wait()
 	for _, result := range results {
+		if result.row != nil && result.err == nil && result.index >= 0 && result.index < len(items) && strings.TrimSpace(result.item.FileMd5) != "" {
+			items[result.index] = result.item
+		}
+	}
+	if strings.TrimSpace(event["source_grouped_id"].String()) != "" {
+		seenMD5 := make(map[string]string, len(items))
+		for index, item := range items {
+			md5Value := strings.TrimSpace(item.FileMd5)
+			if md5Value == "" {
+				continue
+			}
+			if previousFileID := seenMD5[md5Value]; previousFileID != "" && previousFileID != strings.TrimSpace(item.FileId) {
+				message := "相册媒体内容重复，整组重新下载"
+				g.Log().Warning(ctx, "相册媒体一致性校验失败", g.Map{"eventId": event["id"].Int64(), "mediaIndex": index, "fileMd5": md5Value, "previousFileId": previousFileID, "fileId": item.FileId})
+				_, _ = pdao.YoubanPublishCollectEventMedia.Ctx(ctx).Where("event_id", event["id"].Int64()).Data(g.Map{
+					"file_url": "", "storage_path": "", "file_md5": "", "file_phash": "", "cache_status": collectMediaCachePending,
+					"cache_hit": 0, "download_attempts": 0, "error_message": message, collectMediaNextRetryAt: gtime.Now().Add(30 * time.Second), "updated_at": gtime.Now(),
+				}).Update()
+				return changed, newCollectMediaRetryError(message, 30*time.Second)
+			}
+			seenMD5[md5Value] = strings.TrimSpace(item.FileId)
+		}
+	}
+	for _, result := range results {
 		if result.row != nil && result.err != nil && collectMediaSourceGone(result.err) {
 			reason := "TG原消息已删除或无可用媒体，整组资料已丢弃"
 			if discardErr := s.discardCollectEventGroup(ctx, event["id"].Int64(), reason); discardErr != nil {
