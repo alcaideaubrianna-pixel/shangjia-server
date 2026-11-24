@@ -59,6 +59,8 @@ func (e *collectMediaDiscardedError) Error() string {
 
 const defaultCollectMediaDownloadThreads = 4
 
+const collectMediaCacheQuarantineMessage = "缓存已隔离"
+
 // Waiting for an owner must never pin an Asynq worker behind a long-lived
 // lease. The task is requeued with a short delay when the slots are busy.
 const collectMediaOwnerAcquireTimeout = 2 * time.Second
@@ -946,6 +948,9 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 	if row == nil {
 		return false, nil
 	}
+	if collectMediaCacheReuseQuarantined(row) {
+		return false, nil
+	}
 	// Telegram Bot file_id is stable for the same bot/media. Check this
 	// durable key before requiring source chat/message metadata and before the
 	// owner quota is acquired. Account gotd references are scoped by chat and
@@ -1033,6 +1038,13 @@ func (s *sSysPublish) reuseCollectMediaCache(ctx context.Context, row *collectEv
 		return true, nil
 	}
 	return false, nil
+}
+
+func collectMediaCacheReuseQuarantined(row *collectEventMediaRow) bool {
+	if row == nil {
+		return false
+	}
+	return strings.Contains(strings.TrimSpace(row.ErrorMessage), collectMediaCacheQuarantineMessage)
 }
 
 func (s *sSysPublish) applyCollectMediaCacheReuse(ctx context.Context, row *collectEventMediaRow, candidate gdb.Record) bool {
