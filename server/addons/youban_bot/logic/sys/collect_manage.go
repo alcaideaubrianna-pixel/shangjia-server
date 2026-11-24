@@ -447,13 +447,32 @@ func (s *sSysBot) showCollectSourceView(ctx context.Context, botId int64, chatId
 	if err := g.DB().Model("hg_youban_publish_collect_source").Ctx(ctx).Where("id", id).Where("tenant_id", account.TenantId).WhereNull("deleted_at").Scan(&row); err != nil {
 		return err
 	}
+	var ruleIDs []int64
+	if err := g.DB().Model("hg_youban_publish_collect_source_rule").Ctx(ctx).
+		Fields("rule_id").
+		Where("source_id", id).
+		Where("tenant_id", account.TenantId).
+		OrderAsc("sort").
+		Scan(&ruleIDs); err != nil {
+		return err
+	}
 	text := fmt.Sprintf("采集源：%s\n编号：%d\n状态：%s", row.Title, row.Id, map[bool]string{true: "运行中", false: "已暂停"}[row.CollectEnabled == 1])
-	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	buttons := [][]models.InlineKeyboardButton{
 		{{Text: "采集配置", CallbackData: fmt.Sprintf("cm:config:%d", id)}},
-		{{Text: map[bool]string{true: "暂停采集", false: "恢复采集"}[row.CollectEnabled == 1], CallbackData: fmt.Sprintf("cm:toggle:%d", id)}},
-		{{Text: "下架并删除", CallbackData: fmt.Sprintf("cm:down:%d", id)}},
-		{{Text: "返回列表", CallbackData: "cm:list:1"}},
-	}}
+	}
+	if row.SourceType == "bot" {
+		for _, ruleID := range ruleIDs {
+			if ruleID > 0 {
+				buttons = append(buttons, []models.InlineKeyboardButton{{Text: "采集频道后缀", CallbackData: fmt.Sprintf("cm:channels:%d:1", ruleID)}})
+			}
+		}
+	}
+	buttons = append(buttons,
+		[]models.InlineKeyboardButton{{Text: map[bool]string{true: "暂停采集", false: "恢复采集"}[row.CollectEnabled == 1], CallbackData: fmt.Sprintf("cm:toggle:%d", id)}},
+		[]models.InlineKeyboardButton{{Text: "下架并删除", CallbackData: fmt.Sprintf("cm:down:%d", id)}},
+		[]models.InlineKeyboardButton{{Text: "返回列表", CallbackData: "cm:list:1"}},
+	)
+	markup := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
 	botRow, err := s.botById(ctx, botId)
 	if err != nil {
 		return err
@@ -577,7 +596,7 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 		return err
 	}
 	pages := (total + in.PerPage - 1) / in.PerPage
-	lines := []string{fmt.Sprintf("介绍费后缀\n频道列表 · 第 %d/%d 页 · 共 %d 个", page, max(1, pages), total)}
+	lines := []string{fmt.Sprintf("频道列表 · 第 %d/%d 页 · 共 %d 个", page, max(1, pages), total)}
 	buttons := make([][]models.InlineKeyboardButton, 0, len(rows)+4)
 	for _, row := range rows {
 		if row == nil {
@@ -590,12 +609,10 @@ func (s *sSysBot) showCollectRuleChannels(ctx context.Context, botId int64, chat
 		if row.ChannelLink != "" {
 			name += " · " + row.ChannelLink
 		}
-		suffix := row.Suffix
 		status := "已启用"
 		if row.Status != 1 {
 			status = "已禁用"
 		}
-		lines = append(lines, fmt.Sprintf("%s（%s）\n后缀：%s · 状态：%s", html.EscapeString(name), html.EscapeString(row.ChannelId), html.EscapeString(suffix), status))
 		buttons = append(buttons, []models.InlineKeyboardButton{{Text: name + " · " + status, CallbackData: fmt.Sprintf("cm:channel:%d:%d:%s", ruleID, row.Id, row.ChannelId)}})
 	}
 	nav := make([]models.InlineKeyboardButton, 0, 2)
