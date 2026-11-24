@@ -77,6 +77,11 @@ func (s *sSysPublish) handleMediaProcessTask(ctx context.Context, task *asynq.Ta
 		}
 	}
 
+	processStarted := time.Now()
+	g.Log().Info(ctx, "资料媒体处理开始", g.Map{"event": "media_process_started", "mediaId": payload.MediaId, "profileId": media["profile_id"].Int64(), "attempt": retryCount + 1, "purpose": media["purpose"].String(), "sourceHost": mediaFileCacheSourceHost(fileURL)})
+	defer func() {
+		g.Log().Info(ctx, "资料媒体处理结束", g.Map{"event": "media_process_finished", "mediaId": payload.MediaId, "profileId": media["profile_id"].Int64(), "attempt": retryCount + 1, "durationMs": time.Since(processStarted).Milliseconds()})
+	}()
 	metadata, processErr := processMediaAssetMetadata(ctx,
 		media["media_type"].String(),
 		media["storage_path"].String(),

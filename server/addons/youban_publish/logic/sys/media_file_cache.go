@@ -24,6 +24,7 @@ import (
 
 	"hotgo/internal/library/storager"
 	"hotgo/internal/library/telegrammedia"
+	"hotgo/utility/sensitive"
 )
 
 const (
@@ -141,7 +142,7 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (res
 		observeMediaFileCacheSource(ctx, source.Role, "failed", mediaFileCacheErrorClass(sourceErr))
 		g.Log().Warning(ctx, "媒体地址下载失败，尝试下一备用地址", g.Map{
 			"mediaId": media.Id, "purpose": media.Purpose, "sourceRole": source.Role,
-			"sourceHost": mediaFileCacheSourceHost(source.URL), "drive": source.Drive, "error": sourceErr,
+			"sourceHost": mediaFileCacheSourceHost(source.URL), "drive": source.Drive, "error": sensitive.Diagnostic(sourceErr.Error()),
 		})
 	}
 	observeMediaFileCacheSource(ctx, "all", "exhausted", mediaFileCacheErrorClass(lastErr))

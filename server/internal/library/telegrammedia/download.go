@@ -3,13 +3,17 @@ package telegrammedia
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -119,11 +123,65 @@ func transferOnce(ctx context.Context, client *http.Client, source string, maxBy
 	if err != nil {
 		return false, err
 	}
+	started := time.Now()
+	var mu sync.Mutex
+	fields := g.Map{"event": "media_http_download", "method": "GET"}
+	if parsed, parseErr := url.Parse(source); parseErr == nil {
+		fields["destinationHost"] = parsed.Hostname()
+	}
+	set := func(key string, value interface{}) { mu.Lock(); fields[key] = value; mu.Unlock() }
+	mark := func(key string) { set(key, time.Since(started).Milliseconds()) }
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(httptrace.DNSStartInfo) { mark("dnsStartMs") },
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			mark("dnsDoneMs")
+			if info.Err != nil {
+				set("dnsError", sensitive.Diagnostic(info.Err.Error()))
+			}
+		},
+		ConnectStart: func(_, _ string) { mark("connectStartMs") },
+		ConnectDone: func(_, _ string, e error) {
+			mark("connectDoneMs")
+			if e != nil {
+				set("connectError", sensitive.Diagnostic(e.Error()))
+			}
+		},
+		TLSHandshakeStart: func() { mark("tlsStartMs") },
+		TLSHandshakeDone: func(_ tls.ConnectionState, e error) {
+			mark("tlsDoneMs")
+			if e != nil {
+				set("tlsError", sensitive.Diagnostic(e.Error()))
+			}
+		},
+		GotConn: func(info httptrace.GotConnInfo) { mark("gotConnectionMs"); set("connectionReused", info.Reused) },
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			mark("requestWrittenMs")
+			if info.Err != nil {
+				set("writeError", sensitive.Diagnostic(info.Err.Error()))
+			}
+		},
+		GotFirstResponseByte: func() { mark("firstByteMs") },
+	}
+	request = request.WithContext(httptrace.WithClientTrace(ctx, trace))
+	defer func() {
+		hostname, _ := os.Hostname()
+		mu.Lock()
+		defer mu.Unlock()
+		fields["instance"] = hostname
+		fields["durationMs"] = time.Since(started).Milliseconds()
+		if ctx.Err() != nil {
+			fields["contextError"] = ctx.Err().Error()
+		}
+		g.Log().Info(ctx, "媒体HTTP下载诊断", fields)
+	}()
 	request.Header.Set("User-Agent", "youban-server/media-cache")
 	response, err := client.Do(request)
 	if err != nil {
+		set("error", sensitive.Diagnostic(err.Error()))
 		return Retryable(err), err
 	}
+	set("httpStatus", response.StatusCode)
+	set("contentLength", response.ContentLength)
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return response.StatusCode == 408 || response.StatusCode == 429 || response.StatusCode >= 500, &HTTPStatusError{StatusCode: response.StatusCode}
@@ -140,6 +198,10 @@ func transferOnce(ctx context.Context, client *http.Client, source string, maxBy
 		reader = io.LimitReader(reader, maxBytes+1)
 	}
 	count, err := io.Copy(writer, reader)
+	set("transferredBytes", count)
+	if err != nil {
+		set("error", sensitive.Diagnostic(err.Error()))
+	}
 	if err != nil {
 		_ = finish(false)
 		return Retryable(err), err
