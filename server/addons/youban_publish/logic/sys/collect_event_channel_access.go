@@ -18,6 +18,24 @@ type collectEventChannelAccess struct {
 	Allowed    bool
 }
 
+func loadCollectAccountChannelRelation(ctx context.Context, tenantID, accountID, sourceID int64, channelIDs []int64) (botCollectChannelRelation, error) {
+	var relation botCollectChannelRelation
+	if tenantID <= 0 || accountID <= 0 || sourceID <= 0 || len(channelIDs) == 0 {
+		return relation, gerror.New("读取频道采集授权参数不完整")
+	}
+	cols := pdao.YoubanPublishCollectAccountChannel.Columns()
+	err := pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
+		Fields(cols.Id, cols.ChannelId, cols.SourceId, cols.Status).
+		Where(cols.TenantId, tenantID).Where(cols.AccountId, accountID).
+		Where(cols.SourceId, sourceID).WhereIn(cols.ChannelId, channelIDs).
+		WhereNull(cols.DeletedAt).
+		Limit(1).Scan(&relation)
+	if !collectOptionalRecordScanSucceeded(err) {
+		return relation, gerror.Wrap(err, "读取频道采集授权失败")
+	}
+	return relation, nil
+}
+
 // A source can receive multiple channels. Its configured channel_id is never
 // evidence of which channel produced this event or which subscription applies.
 func resolveCollectEventChannelAccess(ctx context.Context, event gdb.Record, accountID int64) (collectEventChannelAccess, error) {
@@ -53,16 +71,9 @@ func resolveCollectEventChannelAccess(ctx context.Context, event gdb.Record, acc
 		ids = append(ids, channel.Id)
 	}
 	result.ChannelIDs = ids
-	relationCols := pdao.YoubanPublishCollectAccountChannel.Columns()
-	err = pdao.YoubanPublishCollectAccountChannel.Ctx(ctx).
-		Fields(relationCols.Id, relationCols.ChannelId, relationCols.SourceId,
-			relationCols.Status).
-		Where(relationCols.TenantId, tenantID).Where(relationCols.AccountId, accountID).
-		Where(relationCols.SourceId, sourceID).WhereIn(relationCols.ChannelId, ids).
-		WhereNull(relationCols.DeletedAt).
-		OrderDesc(relationCols.UpdatedAt).OrderDesc(relationCols.Id).Limit(1).Scan(&result.Relation)
-	if !collectOptionalRecordScanSucceeded(err) {
-		return result, gerror.Wrap(err, "读取事件实际频道采集授权失败")
+	result.Relation, err = loadCollectAccountChannelRelation(ctx, tenantID, accountID, sourceID, ids)
+	if err != nil {
+		return result, err
 	}
 	channel := selectBotCollectChannel(channels, event["source_chat_id"].String())
 	result.ChannelID = channel.Id
