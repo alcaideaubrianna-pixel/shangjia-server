@@ -129,7 +129,10 @@ func (s *sSysPublish) fillIntroFeeChannelEffectiveStatus(ctx context.Context, te
 		for _, candidate := range candidates {
 			for _, row := range list {
 				if row != nil && canonicalCollectSourceChatID(row.ChannelId) == canonicalCollectSourceChatID(candidate.ChannelId) {
-					row.Status, row.BlockReason, row.Blacklisted = candidate.Status, candidate.BlockReason, candidate.Blacklisted
+					// The Web rule list displays the status stored on the current
+					// intro_fee_channel_rule row. Candidate status belongs to
+					// collection discovery and must not overwrite rule status.
+					row.BlockReason, row.Blacklisted = candidate.BlockReason, candidate.Blacklisted
 					row.ProfileCount = candidate.ProfileCount
 				}
 			}
