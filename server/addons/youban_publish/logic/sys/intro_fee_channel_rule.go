@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	botin "hotgo/addons/youban_bot/model/input/sysin"
+	botService "hotgo/addons/youban_bot/service"
 	pdao "hotgo/addons/youban_publish/internal/dao"
 	pdo "hotgo/addons/youban_publish/internal/model/do"
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -841,6 +844,9 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 	if err == nil {
 		_, _ = cache.Instance().Remove(ctx, introFeeChannelRuleCacheKey(tenantID, accountID, in.RuleId, in.BotId, in.ChannelId))
 		s.refreshCollectSourceCache(ctx)
+		if notifyErr := s.notifyIntroFeeChannelRuleChanged(ctx, tenantID, accountID, in, id); notifyErr != nil {
+			g.Log().Warning(ctx, "频道后缀变更通知失败", g.Map{"tenantId": tenantID, "accountId": accountID, "ruleId": in.RuleId, "channelId": in.ChannelId, "error": notifyErr.Error()})
+		}
 		g.Log().Info(ctx, "频道采集状态保存完成", g.Map{
 			"event": "collect_channel_binding_saved", "tenantId": tenantID,
 			"accountId": accountID, "ruleId": in.RuleId, "botId": in.BotId,
@@ -849,6 +855,28 @@ func (s *sSysPublish) saveIntroFeeChannelCollectionStatus(ctx context.Context, t
 		})
 	}
 	return
+}
+
+func (s *sSysPublish) notifyIntroFeeChannelRuleChanged(ctx context.Context, tenantID, accountID int64, in *sysin.IntroFeeChannelRuleSaveInp, channelRuleID int64) error {
+	statusText := "已启用"
+	if in.Status == 2 {
+		statusText = "已禁用"
+	}
+	text := fmt.Sprintf("📢 采集频道后缀已变更\n\n规则 ID：%d\n频道 ID：%s\n变更类型：频道后缀与状态变更\n新后缀：%s\n当前状态：%s\n规则记录 ID：%d\n\n后续新采集资料将按照最新频道后缀处理。", in.RuleId, html.EscapeString(in.ChannelId), html.EscapeString(strings.TrimSpace(in.Suffix)), statusText, channelRuleID)
+	if err := botService.SysBot().NotifyCollectEvent(ctx, 0, "", fmt.Sprintf("collect-channel-rule-change:%d:%d:%d", tenantID, channelRuleID, gtime.Now().UnixNano()), text, nil); err != nil {
+		return err
+	}
+	var accountIDs []int64
+	err := g.DB().Model(pdao.YoubanPublishCollectSource.Table()+" s").Ctx(ctx).
+		Fields("DISTINCT s.account_id").
+		Where("s.tenant_id", tenantID).Where("s.account_id > 0").Where("s.account_id !=", accountID).
+		WhereNull("s.deleted_at").
+		Where("EXISTS (SELECT 1 FROM "+pdao.YoubanPublishCollectSourceRule.Table()+" sr WHERE sr.source_id=s.id AND sr.tenant_id=? AND sr.rule_id=? AND sr.status=1)", tenantID, in.RuleId).
+		Scan(&accountIDs)
+	if err != nil {
+		return err
+	}
+	return botService.SysBot().NotifyAccounts(ctx, &botin.NotifyAccountsInp{App: "api", AccountIds: accountIDs, BotStrategy: "official", FallbackBoundBot: true, IgnoreFeatureSwitch: true, Text: text, ParseMode: "HTML"})
 }
 
 func (s *sSysPublish) IntroFeeChannelRuleSave(ctx context.Context, in *sysin.IntroFeeChannelRuleSaveInp) (int64, error) {
