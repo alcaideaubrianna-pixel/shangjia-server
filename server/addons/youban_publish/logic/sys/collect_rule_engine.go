@@ -256,6 +256,10 @@ func applyCollectFeeScopedRules(text string, rule gdb.Record, truncate bool) str
 // preserveCollectNonFeeLines is the final persistence invariant. All source
 // lines outside the fee line and its immediate neighbours must survive.
 func preserveCollectNonFeeLines(original, processed string) string {
+	return preserveCollectNonFeeLinesWithFilter(original, processed, nil)
+}
+
+func preserveCollectNonFeeLinesWithFilter(original, processed string, shouldRestore func(string) bool) string {
 	originalLines := strings.Split(strings.ReplaceAll(original, "\r\n", "\n"), "\n")
 	protected := make([]bool, len(originalLines))
 	for index := range protected {
@@ -280,6 +284,9 @@ func preserveCollectNonFeeLines(original, processed string) string {
 	remaining := processed
 	for index, line := range originalLines {
 		if !protected[index] || strings.TrimSpace(line) == "" {
+			continue
+		}
+		if shouldRestore != nil && !shouldRestore(line) {
 			continue
 		}
 		if position := strings.Index(remaining, line); position >= 0 {

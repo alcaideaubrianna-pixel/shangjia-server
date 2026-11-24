@@ -236,14 +236,24 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 				candidate = strings.TrimPrefix(candidate, headerPrefix)
 			}
 		}
-		preserved := preserveCollectNonFeeLines(rawText, candidate)
-		// 处理顺序必须固定：先恢复必要的原文，再执行删除行、删除文本和
-		// 替换规则。否则标题等受保护行会把已经删除的关键词恢复回来。
-		// 添加文案在 renderCollectRuleText 中执行，并在这里通过 footerSuffix
-		// 暂存，确保用户配置的前置/后置文案不会被源文本清洗规则误删。
-		preserved = applyCollectLineDeletes(preserved, collectRuleStrings(rule, "delete_lines"))
-		preserved = applyCollectTextDeletes(preserved, collectRuleStrings(rule, "delete_texts"))
-		preserved = applyCollectReplacements(preserved, collectRuleReplacements(rule))
+		preserved := preserveCollectNonFeeLinesWithFilter(rawText, candidate, func(line string) bool {
+			for _, value := range collectRuleStrings(rule, "delete_lines") {
+				if strings.TrimSpace(value) != "" && strings.TrimSpace(line) == strings.TrimSpace(value) {
+					return false
+				}
+			}
+			for _, value := range collectRuleStrings(rule, "delete_texts") {
+				if value != "" && strings.Contains(line, value) {
+					return false
+				}
+			}
+			for _, replacement := range collectRuleReplacements(rule) {
+				if strings.Contains(line, replacement.From) {
+					return false
+				}
+			}
+			return true
+		})
 		preserved = headerPrefix + preserved
 		if preserved != candidate {
 			g.Log().Warningf(ctx, "采集资料费用窗口外原文保护已触发 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(candidate)), len([]rune(preserved)))
@@ -266,8 +276,6 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	} else {
 		text = normalizeCollectRuleBody(text, rule)
 	}
-	// Keep the standalone caption guard in the shared pipeline before adding
-	// configured headers, footers, or introduction-fee suffixes.
 	if shouldDropCollectStandaloneCodeCaption(text, event["media_count"].Int()) {
 		text = ""
 	}
