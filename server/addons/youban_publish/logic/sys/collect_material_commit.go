@@ -227,7 +227,24 @@ func (s *sSysPublish) commitCollectMaterial(ctx context.Context, event gdb.Recor
 func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gdb.Record, rule gdb.Record, text string) string {
 	rawText := authoritativeCollectRawText(event["raw_text"].String())
 	preserveNonFeeLines := func(candidate string) string {
+		headerPrefix := ""
+		if header := strings.TrimSpace(rule["header_markdown"].String()); header != "" {
+			headerPrefix = header + "\n\n"
+			if !strings.HasPrefix(candidate, headerPrefix) {
+				headerPrefix = ""
+			} else {
+				candidate = strings.TrimPrefix(candidate, headerPrefix)
+			}
+		}
 		preserved := preserveCollectNonFeeLines(rawText, candidate)
+		// 处理顺序必须固定：先恢复必要的原文，再执行删除行、删除文本和
+		// 替换规则。否则标题等受保护行会把已经删除的关键词恢复回来。
+		// 添加文案在 renderCollectRuleText 中执行，并在这里通过 footerSuffix
+		// 暂存，确保用户配置的前置/后置文案不会被源文本清洗规则误删。
+		preserved = applyCollectLineDeletes(preserved, collectRuleStrings(rule, "delete_lines"))
+		preserved = applyCollectTextDeletes(preserved, collectRuleStrings(rule, "delete_texts"))
+		preserved = applyCollectReplacements(preserved, collectRuleReplacements(rule))
+		preserved = headerPrefix + preserved
 		if preserved != candidate {
 			g.Log().Warningf(ctx, "采集资料费用窗口外原文保护已触发 eventId:%d ruleId:%d beforeLen:%d afterLen:%d", event["id"].Int64(), rule["id"].Int64(), len([]rune(candidate)), len([]rune(preserved)))
 		}
