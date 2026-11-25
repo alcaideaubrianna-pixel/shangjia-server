@@ -82,6 +82,20 @@ func IsShortNeighbour(line string, limit int, protected func(string) bool) bool 
 	return visibleLength(clean) < limit
 }
 
+func IsShortTitle(line string) bool {
+	normalized := strings.TrimSpace(Normalize(line))
+	if normalized == "" || strings.ContainsAny(normalized, ":：=;；") {
+		return false
+	}
+	visible := 0
+	for _, char := range normalized {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			visible++
+		}
+	}
+	return visible > 0 && visible < 6
+}
+
 func ProcessSuffix(text, suffix string, limit int, protected func(string) bool) string {
 	suffix = strings.TrimSpace(suffix)
 	if suffix == "" {

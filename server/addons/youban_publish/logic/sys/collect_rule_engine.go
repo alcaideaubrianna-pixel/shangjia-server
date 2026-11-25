@@ -450,17 +450,7 @@ func previousCollectContentLine(lines []string, before int) int {
 }
 
 func collectShortTitleLine(line string) bool {
-	normalized := normalizeCollectKeywordText(strings.TrimSpace(line))
-	if strings.ContainsAny(normalized, ":：=;；") {
-		return false
-	}
-	visible := 0
-	for _, char := range normalized {
-		if unicode.IsLetter(char) || unicode.IsDigit(char) {
-			visible++
-		}
-	}
-	return visible > 0 && visible < 6
+	return introfee.IsShortTitle(line)
 }
 
 func isCollectMaterialAlphaNumericCode(line string) bool {
