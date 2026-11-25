@@ -17,19 +17,18 @@ import (
 )
 
 var (
-	collectLinkPattern                = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
-	collectUsernamePattern            = regexp.MustCompile(`@`)
-	collectStandaloneCodeCaptionRule  = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
-	collectMaterialMetaLineRule       = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
-	collectMaterialCodeLineRule       = regexp.MustCompile(`^\s*(?:[A-Za-z]{1,5}[-_ ]?[0-9０-９]{2,10}|[\p{Han}]{1,8}[-_ ]?[A-Za-z0-9０-９]{2,8})(?:[^A-Za-z0-9０-９]|$)`)
-	collectIntroFeeAmountRule         = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
-	collectIntroFeeLooseAmountRule    = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
-	collectNumberRule                 = regexp.MustCompile(`[0-9０-９]+`)
-	collectIntroFeeStandaloneSuffix   = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
-	collectIntroFeeAttachedSourceMark = regexp.MustCompile(`(?:情诗|七七)[\p{Han}A-Za-z0-9_，、,./-]*$`)
-	collectFeeKeywordPattern          = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接|感谢)费|大米`)
-	collectMultiPricePattern          = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
-	collectCriticalProfileLineRules   = []*regexp.Regexp{
+	collectLinkPattern               = regexp.MustCompile(`(?i)(https?://|t\.me/|telegram\.me/)`)
+	collectUsernamePattern           = regexp.MustCompile(`@`)
+	collectStandaloneCodeCaptionRule = regexp.MustCompile(`^[A-Za-z]{1,4}\d{3,6}$`)
+	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
+	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:[A-Za-z]{1,5}[-_ ]?[0-9０-９]{2,10}|[\p{Han}]{1,8}[-_ ]?[A-Za-z0-9０-９]{2,8})(?:[^A-Za-z0-9０-９]|$)`)
+	collectIntroFeeAmountRule        = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
+	collectIntroFeeLooseAmountRule   = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
+	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
+	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
+	collectFeeKeywordPattern         = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接|感谢)费|大米`)
+	collectMultiPricePattern         = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
+	collectCriticalProfileLineRules  = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:年龄|年齡|age)[^0-9０-９\n]{0,12}[0-9０-９]`),
 		regexp.MustCompile(`(?i)(?:身高|height)[^0-9０-９\n]{0,12}[0-9０-９]`),
 		regexp.MustCompile(`(?i)(?:体重|體重|weight)[^0-9０-９\n]{0,12}[0-9０-９]`),
@@ -665,15 +664,18 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 
 func stripCollectIntroFeeAttachedSourceMark(line string) string {
 	normalized := normalizeCollectKeywordText(line)
-	match := collectIntroFeeAttachedSourceMark.FindStringIndex(normalized)
-	if match == nil {
+	match := collectIntroFeeAmountRule.FindStringSubmatchIndex(normalized)
+	if len(match) < 4 {
+		match = collectIntroFeeLooseAmountRule.FindStringSubmatchIndex(normalized)
+	}
+	if len(match) < 4 {
 		return line
 	}
-	feeIndex := strings.Index(normalized[:match[0]], "介绍费")
-	if feeIndex < 0 {
+	feeKeyword := collectFeeKeywordPattern.FindString(normalized)
+	if feeKeyword == "" {
 		return line
 	}
-	return strings.TrimSpace(line[:match[0]])
+	return strings.TrimSpace(normalized[:match[3]])
 }
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
