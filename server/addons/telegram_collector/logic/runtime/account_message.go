@@ -41,7 +41,7 @@ func (w *accountWorker) bindAccountMessageHandlers(dispatcher tg.UpdateDispatche
 // Return success to the update dispatcher only after every matching source
 // has durably accepted the event. A process-local buffer cannot acknowledge it.
 func (w *accountWorker) handleAccountMessage(ctx context.Context, entities tg.Entities, message *tg.Message) error {
-	if w == nil || message == nil || message.Out {
+	if w == nil || message == nil {
 		return nil
 	}
 	chatIDs := accountMessageChatIDs(message)

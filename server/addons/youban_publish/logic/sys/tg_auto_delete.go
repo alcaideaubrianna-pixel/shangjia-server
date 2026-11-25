@@ -92,16 +92,28 @@ func telegramMessageText(msg *models.Message) string {
 }
 
 func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64, tenantId int64, msg *models.Message, text string) {
-	if msg == nil || msg.ID <= 0 || strings.TrimSpace(text) == "" {
+	if msg == nil {
+		return
+	}
+	s.handleTelegramAutoDeleteValues(ctx, botId, tenantId, strconv.FormatInt(msg.Chat.ID, 10), msg.ID, text)
+}
+
+func (s *sSysPublish) handleTelegramAutoDeleteValues(ctx context.Context, botId, tenantId int64, chatID string, messageID int, text string) {
+	if messageID <= 0 || strings.TrimSpace(text) == "" {
 		return
 	}
 	if telegramTextHasInternalDeliveryMarker(text) {
 		return
 	}
-	channel, err := s.autoDeleteChannel(ctx, msg.Chat, tenantId)
+	normalizedChatID := normalizeTelegramChannelChatID(chatID)
+	parsedChatID, err := strconv.ParseInt(normalizedChatID, 10, 64)
+	if err != nil || parsedChatID == 0 {
+		return
+	}
+	channel, err := s.autoDeleteChannel(ctx, models.Chat{ID: parsedChatID}, tenantId)
 	if err != nil || channel == nil || channel.Id <= 0 {
 		if err != nil {
-			autoDeleteWarn(ctx, "bot_channel_lookup", "频道自动删除查询频道失败 chat:%d err:%+v", msg.Chat.ID, err)
+			autoDeleteWarn(ctx, "bot_channel_lookup", "频道自动删除查询频道失败 chat:%s err:%+v", chatID, err)
 		}
 		return
 	}
@@ -120,18 +132,18 @@ func (s *sSysPublish) handleTelegramAutoDelete(ctx context.Context, botId int64,
 	if keyword == "" {
 		return
 	}
-	if s.isTelegramPublishMessage(ctx, strconv.FormatInt(msg.Chat.ID, 10), msg.ID) {
-		g.Log().Infof(ctx, "频道自动删除跳过上架资料消息 channel:%d chat:%d message:%d keyword:%s", channel.Id, msg.Chat.ID, msg.ID, keyword)
+	if s.isTelegramPublishMessage(ctx, normalizedChatID, messageID) {
+		g.Log().Infof(ctx, "频道自动删除跳过上架资料消息 channel:%d chat:%s message:%d keyword:%s", channel.Id, normalizedChatID, messageID, keyword)
 		return
 	}
 	if err = s.enqueueTelegramAutoDelete(ctx, autoDeleteQueuePayload{
 		BotId: botId, TenantId: tenantId, AccountId: channel.TgAccountId, ChannelId: channel.Id,
-		ChatId: strconv.FormatInt(msg.Chat.ID, 10), MessageId: msg.ID, Keyword: keyword,
+		ChatId: normalizedChatID, MessageId: messageID, Keyword: keyword,
 	}); err != nil {
-		autoDeleteWarn(ctx, fmt.Sprintf("enqueue:%d:%d", channel.Id, msg.ID), "频道自动删除任务入队失败 channel:%d message:%d err:%+v", channel.Id, msg.ID, err)
+		autoDeleteWarn(ctx, fmt.Sprintf("enqueue:%d:%d", channel.Id, messageID), "频道自动删除任务入队失败 channel:%d message:%d err:%+v", channel.Id, messageID, err)
 		return
 	}
-	g.Log().Infof(ctx, "频道自动删除已入队 channel:%d chat:%d message:%d keyword:%s", channel.Id, msg.Chat.ID, msg.ID, keyword)
+	g.Log().Infof(ctx, "频道自动删除已入队 channel:%d chat:%s message:%d keyword:%s", channel.Id, normalizedChatID, messageID, keyword)
 }
 
 func (s *sSysPublish) handleTelegramAutoDeleteTask(ctx context.Context, task *asynq.Task) error {

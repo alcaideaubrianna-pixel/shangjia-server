@@ -165,6 +165,10 @@ func (w *accountCollectWorker) HandleAccountRuntimeMessage(ctx context.Context, 
 	if w == nil || message == nil {
 		return
 	}
+	w.service.handleTelegramAutoDeleteValues(ctx, 0, 0, listenerMessageChatID(message), message.ID, listenerMessageText(message))
+	if message.Out {
+		return
+	}
 	if gotdMessageGroupedId(message) != "" {
 		w.bufferListenerGroupedMessage(ctx, entities, message, chatIDs)
 		return
