@@ -514,6 +514,25 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 			if err = s.markCollectMaterialWaitingVerify(ctx, event["id"].Int64()); err != nil {
 				return err
 			}
+			if collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
+				const unmatchedMessage = "验证窗口已结束，未找到同源验证视频，停止等待"
+				if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), unmatchedMessage, "group"); err != nil {
+					return err
+				}
+				if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
+					Where("id", event["id"].Int64()).
+					Data(g.Map{"material_group_status": "unmatched", "updated_at": gtime.Now()}).Update(); err != nil {
+					return gerror.Wrap(err, "标记验证窗口未匹配状态失败")
+				}
+				g.Log().Info(ctx, "采集验证窗口到期，停止无验证资料重试", g.Map{
+					"event":           "collect.admission.verify_expired",
+					"eventId":         event["id"].Int64(),
+					"sourceId":        event["source_id"].Int64(),
+					"sourceMessageId": event["source_message_id"].Int64(),
+					"verifyWindow":    collectMaterialVerifyWindow().String(),
+				})
+				return nil
+			}
 			g.Log().Info(ctx, "采集准入等待已匹配验证视频", g.Map{
 				"event": "collect.admission.waiting_verify", "eventId": event["id"].Int64(),
 				"tenantId": payload.TenantId, "accountId": payload.AccountId,
