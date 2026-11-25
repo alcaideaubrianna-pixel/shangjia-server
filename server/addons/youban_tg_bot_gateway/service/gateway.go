@@ -6,6 +6,7 @@ import (
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/gogf/gf/v2/errors/gerror"
 
 	"hotgo/internal/library/telegrammedia"
 )
@@ -83,6 +84,19 @@ func Gateway() IGateway {
 }
 
 func RegisterGateway(i IGateway) { localGateway = i }
+
+// EnsureBotRegistered performs an explicit, token-scoped runtime registration.
+// Keep it optional on IGateway so existing alternate gateway implementations
+// cannot silently claim to have registered a webhook.
+func EnsureBotRegistered(ctx context.Context, token string) error {
+	registrar, ok := Gateway().(interface {
+		EnsureBotRegistered(context.Context, string) error
+	})
+	if !ok {
+		return gerror.New("当前TG Bot Gateway不支持同步注册")
+	}
+	return registrar.EnsureBotRegistered(ctx, token)
+}
 
 func RegisterProvider(provider Provider) {
 	if provider == nil || provider.Name() == "" {

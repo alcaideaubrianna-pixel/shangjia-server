@@ -276,6 +276,57 @@ func (s *sGateway) Probe(ctx context.Context, token string) (*models.User, error
 	return client.GetMe(ctx)
 }
 
+func (s *sGateway) EnsureBotRegistered(ctx context.Context, token string) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	token = strings.TrimSpace(token)
+	key := tokenKey(token)
+	bindings, err := loadClientBindings(ctx, key, service.Providers())
+	if err != nil {
+		return err
+	}
+	if token == "" || len(bindings[key]) == 0 {
+		return gerror.New("TG Bot Gateway未找到已启用的Bot")
+	}
+	conf, err := service.RuntimeConfiguration(ctx)
+	if err != nil {
+		return err
+	}
+	mode := runtimeMode(ctx, conf)
+	s.mu.Lock()
+	running := s.cancel != nil
+	s.mu.Unlock()
+	if mode != "webhook" && !running {
+		return gerror.New("当前为轮询模式，请在Gateway Runtime节点完成Bot注册")
+	}
+	// An explicit check repairs externally removed webhooks even when the
+	// local runtime signature has not changed. Never delete pending updates.
+	if mode == "webhook" {
+		client, err := newBot(token, conf.ProxyURL, conf.RuntimeServerURL, nil)
+		if err != nil {
+			return err
+		}
+		params := &tgbot.SetWebhookParams{
+			URL:            strings.TrimRight(conf.WebhookBaseURL, "/") + "/api/youban_tg_bot_gateway/telegram/webhook?key=" + key,
+			AllowedUpdates: allowedUpdates(), SecretToken: conf.WebhookSecret,
+		}
+		registered, err := client.SetWebhook(ctx, params)
+		if err != nil {
+			return gerror.Wrap(err, "注册TG Bot Gateway Webhook失败")
+		}
+		if !registered {
+			return gerror.New("Telegram未确认Gateway Webhook注册成功")
+		}
+	} else if err := s.ensure(ctx, key, token, mode, conf); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.bindings[key] = bindings[key]
+	s.mu.Unlock()
+	g.Log().Info(ctx, "TG Bot Gateway同步注册完成", g.Map{"event": "gateway_bot_registered", "botKey": key, "mode": mode})
+	return nil
+}
+
 func (s *sGateway) sync(ctx context.Context) error {
 	// Client() may be called concurrently by media workers, auto-delete jobs,
 	// and webhook handlers. Serialize the Telegram sync so one bot cannot issue

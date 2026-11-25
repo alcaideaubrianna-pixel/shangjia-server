@@ -158,6 +158,14 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 	if err != nil {
 		return nil, err
 	}
+	for _, botItem := range bots {
+		startedAt := time.Now()
+		registrationErr := gatewayservice.EnsureBotRegistered(ctx, botItem.BotToken)
+		logChannelCheckStage(ctx, "gateway_registration_completed", in.TgAccountId, in.TargetChatId, botItem.Id, startedAt, registrationErr)
+		if registrationErr != nil {
+			return nil, gerror.Wrapf(registrationErr, "注册频道Bot到Gateway失败 botId:%d", botItem.Id)
+		}
+	}
 	chatID := normalizeTelegramChannelChatID(in.TargetChatId)
 	needAttach := false
 	results := make([]*sysin.ChannelCheckBotModel, len(bots))
