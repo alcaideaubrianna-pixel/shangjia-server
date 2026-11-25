@@ -112,7 +112,12 @@ func (s *sSysPublish) profilePushChannels(ctx context.Context, profile *sysin.Pr
 					"accountId": profile.AccountId, "profileId": profile.Id,
 					"channelId": channel.ChannelId, "error": err.Error(),
 				})
-				return nil, err
+				// Continuous-rotation timing is supplementary metadata for
+				// the profile/channel view. A migration gap or a stale snapshot
+				// must not block ordinary profile publishing or hide the
+				// channel from the caller.
+				channel.NextPushAt = nil
+				channel.NextPushAtEstimated = false
 			}
 			continue
 		}
