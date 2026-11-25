@@ -392,15 +392,18 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	if err != nil {
 		return gerror.Wrap(err, "保存频道配置失败")
 	}
+	bindingChanged := isCreate || existing == nil || existing.TgAccountId != in.TgAccountId || !sameInt64Slice(existingBotIds, in.BotIds)
 	if !reusedStableIdentity {
 		if err = s.syncChannelCycleAfterSave(ctx, in.TenantId, in.Id, in.CyclePublishEnabled, in.CyclePublishDays, in.CyclePublishTime); err != nil {
 			return err
 		}
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
-	s.refreshAccountChannelCacheAfterSave(ctx, in.TenantId, in.TgAccountId)
-	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
-		g.Log().Warningf(ctx, "频道配置保存后刷新TG Bot Gateway失败：%+v", refreshErr)
+	if bindingChanged {
+		s.refreshAccountChannelCacheAfterSave(ctx, in.TenantId, in.TgAccountId)
+		if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+			g.Log().Warningf(ctx, "频道 Bot 或账户变更后刷新TG Bot Gateway失败：%+v", refreshErr)
+		}
 	}
 	s.refreshCollectSourceCache(ctx)
 	return nil
