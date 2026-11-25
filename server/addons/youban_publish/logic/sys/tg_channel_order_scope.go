@@ -73,7 +73,7 @@ func telegramChannelStartedJobSQL(alias string) string {
 	if alias != "" {
 		p = strings.TrimSuffix(alias, ".") + "."
 	}
-	return fmt.Sprintf(`(%s OR %sstatus IN ('sending','confirming','unknown','reconciling') OR (%sstatus='pending' AND %ssend_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming')) OR (%sstatus='failed_retry' AND (%snext_retry_at IS NULL OR %snext_retry_at<=CURRENT_TIMESTAMP) AND %sdispatch_status IN ('','idle') AND %ssend_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming')))`, telegramChannelPendingCleanupSQL(alias), p, p, p, p, p, p, p, p)
+	return fmt.Sprintf(`(%s OR %sstatus IN ('sending','confirming','unknown','reconciling') OR (%sstatus='pending' AND %ssend_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming')) OR (%sstatus='failed_retry' AND (%snext_retry_at IS NULL OR %snext_retry_at<=CURRENT_TIMESTAMP) AND %sdispatch_status IN ('','idle') AND %ssend_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming')))`, telegramChannelPendingCleanupSQL(alias), p, p, p, p, p, p, p, p, p, p, p)
 }
 
 func telegramChannelOrderScopeSQL(alias string, job telegramJobRecord) (string, []interface{}) {
