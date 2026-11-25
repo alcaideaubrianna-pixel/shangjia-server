@@ -94,12 +94,7 @@ func appendCaptionSuffix(lines []string, suffix string) []string {
 }
 
 func telegramCaptionContainsFeeText(text string) bool {
-	for _, keyword := range []string{"介绍费", "推荐费", "辛苦费", "包含费"} {
-		if strings.Contains(text, keyword) {
-			return true
-		}
-	}
-	return false
+	return collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(text))
 }
 
 func appendCaptionMark(lines []string, mark string, position string) []string {
