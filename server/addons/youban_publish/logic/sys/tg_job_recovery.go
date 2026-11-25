@@ -1682,6 +1682,9 @@ func (s *sSysPublish) requeueStaleTelegramSendingJob(ctx context.Context, job te
 		}
 		job = current
 	}
+	if recovered, err := s.recoverTelegramVerifyPreparation(ctx, job, gtime.Now().Add(-telegramSendingJobRecoverAfter)); err != nil || recovered {
+		return err
+	}
 	now := gtime.Now()
 	status := "failed_retry"
 	message := "TG推送任务长时间处于发送中，已自动重新投递"

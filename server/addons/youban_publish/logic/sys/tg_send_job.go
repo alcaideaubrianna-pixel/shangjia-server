@@ -207,6 +207,13 @@ func (s *sSysPublish) SendTelegramJob(ctx context.Context, jobId int64) (resultE
 	}()
 	// Recheck under the send lease before the order gate: a paused channel must
 	// settle its queued jobs even when an earlier job still blocks the head.
+	// Owning the send lease proves no live sender still owns preparation.
+	// Do not wait for the generic full-job timeout after a container restart.
+	if targetJob.Status == telegramJobStatusSending && targetJob.SendPhase == telegramSendPhaseDisplayConfirmed {
+		if recovered, recoveryErr := s.recoverTelegramVerifyPreparation(ctx, targetJob, gtime.Now().Add(-time.Minute)); recoveryErr != nil || recovered {
+			return recoveryErr
+		}
+	}
 	if paused, pauseErr := s.postponePermissionPausedJob(ctx, targetJob); pauseErr != nil || paused {
 		return pauseErr
 	}
@@ -700,6 +707,17 @@ func (s *sSysPublish) sendLockedTelegramJob(ctx context.Context, job telegramJob
 	if telegramVerifyMediaNeedsAccountUpload(verifyMedia) {
 		g.Log().Infof(ctx, "TG验证资料无可复用file_id，先尝试Bot本地上传 jobId:%d channelId:%d media:%s", job.Id, job.ChannelId, telegramMediaDebugSummary(verifyMedia))
 	}
+	// Copy refs are not used for verification. Prepare the same upload
+	// candidates before persisting an Attempt that implies remote uncertainty.
+	verifyMedia = telegramMediaSetWithoutCopyRefs(verifyMedia)
+	defer cleanupPreparedTelegramMedia(verifyMedia)
+	prepareCtx, cancelPrepare := context.WithTimeout(ctx, telegrambudget.Verify(ctx))
+	cleanupVerify, prepareErr := s.prepareTelegramVerifyUploads(prepareCtx, verifyMedia)
+	cancelPrepare()
+	if prepareErr != nil {
+		return telegramPreparationError(prepareErr)
+	}
+	defer cleanupVerify()
 	step = beginTelegramPublishStage(ctx, "verify.attempt_create", g.Map{"expectedCount": len(verifyMedia)})
 	verifyAttempt, err := s.prepareTelegramDeliveryAttempt(ctx, job, "verify", len(verifyMedia), true)
 	step.End(err, g.Map{"attemptId": verifyAttempt.Id})

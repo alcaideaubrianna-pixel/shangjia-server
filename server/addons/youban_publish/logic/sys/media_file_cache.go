@@ -42,6 +42,45 @@ var mediaFileCacheDownloadGroup singleflight.Group
 var mediaFileCacheGenerateGroup singleflight.Group
 var mediaFileCachePruneScheduler mediaFileCachePruner
 
+// mediaFileCacheObservationContextKey carries only safe media identifiers to download logs.
+type mediaFileCacheObservationContextKey struct{}
+
+// logMediaFileCacheObservation never records URLs, paths or raw transport errors:
+// signed query parameters and Telegram file tokens can appear in all three.
+func logMediaFileCacheObservation(ctx context.Context, event, source, path string, startedAt time.Time, err error, extra g.Map) {
+	metadata, ok := ctx.Value(mediaFileCacheObservationContextKey{}).(g.Map)
+	if !ok || metadata["mediaType"] != "video" {
+		return
+	}
+	fields := g.Map{
+		"log_type": "media_download", "event": event,
+		"sourceHost": mediaFileCacheSourceHost(source), "sourceRole": "remote",
+		"durationMs": time.Since(startedAt).Milliseconds(),
+		"bytes":      fileSizeValue(path), "byteSemantics": "observed_file_size",
+		"result": "success",
+	}
+	if strings.HasSuffix(event, "_started") {
+		fields["result"] = "in_progress"
+	}
+	if metadata, ok := ctx.Value(mediaFileCacheObservationContextKey{}).(g.Map); ok {
+		for key, value := range metadata {
+			fields[key] = value
+		}
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	if err != nil {
+		fields["result"] = "failed"
+		fields["errorClass"] = mediaFileCacheErrorClass(err)
+		observeVideoFileCache(ctx, event, fmt.Sprint(fields["sourceRole"]), "failed", time.Since(startedAt), fileSizeValue(path))
+		g.Log().Warning(ctx, "媒体下载观测", fields)
+		return
+	}
+	observeVideoFileCache(ctx, event, fmt.Sprint(fields["sourceRole"]), fmt.Sprint(fields["result"]), time.Since(startedAt), fileSizeValue(path))
+	g.Log().Info(ctx, "媒体下载观测", fields)
+}
+
 type mediaFileCachePruner struct {
 	mu          sync.Mutex
 	running     bool
@@ -103,15 +142,22 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (res
 	if media == nil {
 		return "", nil, gerror.New("媒体文件为空")
 	}
+	ctx = context.WithValue(ctx, mediaFileCacheObservationContextKey{}, g.Map{
+		"mediaId": media.Id, "mediaType": media.MediaType, "purpose": media.Purpose,
+		"jobId": media.JobId, "tenantId": media.TenantId, "accountId": media.AccountId,
+		"sourceRole": "local",
+	})
 	if path := strings.TrimSpace(media.StoragePath); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
+			logMediaFileCacheObservation(ctx, "media_cache_hit", "", localPath, time.Now(), nil, nil)
 			return localPath, nil, nil
 		}
 	}
 	if path := localTelegramFileURLPath(media.FileUrl); path != "" {
 		localPath := resolveTelegramLocalPath(path)
 		if fileExists(localPath) {
+			logMediaFileCacheObservation(ctx, "media_cache_hit", "", localPath, time.Now(), nil, nil)
 			return localPath, nil, nil
 		}
 	}
@@ -126,7 +172,12 @@ func cachedTelegramMediaFile(ctx context.Context, media *telegramMediaItem) (res
 	for index, source := range sources {
 		downloader := mediaFileCacheSourceDownloader(ctx, source)
 		step := beginTelegramPublishStage(ctx, "media.cache.download", g.Map{"mediaId": media.Id, "sourceIndex": index, "sourceRole": source.Role, "sourceHost": mediaFileCacheSourceHost(source.URL)})
-		path, sourceErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx, source.CacheKey, source.URL, source.URL, mediaFileCacheExt(media, source.URL), downloader)
+		downloadCtx := context.WithValue(ctx, mediaFileCacheObservationContextKey{}, g.Map{
+			"mediaId": media.Id, "mediaType": media.MediaType, "purpose": media.Purpose,
+			"jobId": media.JobId, "tenantId": media.TenantId, "accountId": media.AccountId,
+			"sourceIndex": index, "sourceRole": source.Role,
+		})
+		path, sourceErr := cachedRemoteMediaFileWithMetaSourceAndDownloader(downloadCtx, source.CacheKey, source.URL, source.URL, mediaFileCacheExt(media, source.URL), downloader)
 		step.End(sourceErr)
 		if sourceErr == nil {
 			observeMediaFileCacheSource(ctx, source.Role, "success", "ok")
@@ -232,6 +283,16 @@ func mediaFileCacheErrorClass(err error) string {
 	if err == nil {
 		return "ok"
 	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var transferStatus *telegrammedia.HTTPStatusError
+	if errors.As(err, &transferStatus) {
+		err = &mediaFileCacheHTTPStatusError{statusCode: transferStatus.StatusCode}
+	}
 	var statusErr *mediaFileCacheHTTPStatusError
 	if !errors.As(err, &statusErr) {
 		return "network"
@@ -311,8 +372,9 @@ func mediaFileCacheCDNURL(ctx context.Context, configKey string, objectPath stri
 func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSource) func(context.Context, string, string) error {
 	if strings.EqualFold(source.Drive, "oss") && source.ObjectPath != "" {
 		return func(downloadCtx context.Context, _ string, targetPath string) error {
+			startedAt := time.Now()
 			if err := storager.DownloadOssObjectToFile(downloadCtx, source.ObjectPath, targetPath); err != nil {
-				g.Log().Warningf(downloadCtx, "OSS内网下载失败，降级使用公开地址 objectPath:%s err:%+v", source.ObjectPath, err)
+				logMediaFileCacheObservation(downloadCtx, "media_download_origin_fallback", source.URL, targetPath, startedAt, err, g.Map{"drive": "oss"})
 				return downloadMediaFileCache(downloadCtx, source.URL, targetPath)
 			}
 			return nil
@@ -325,8 +387,9 @@ func mediaFileCacheSourceDownloader(ctx context.Context, source mediaFileCacheSo
 		return nil
 	}
 	return func(downloadCtx context.Context, _ string, targetPath string) error {
+		startedAt := time.Now()
 		if err := storager.DownloadCosObjectToFile(downloadCtx, source.ObjectPath, targetPath); err != nil {
-			g.Log().Warningf(downloadCtx, "COS源站下载失败，降级使用CDN objectPath:%s err:%+v", source.ObjectPath, err)
+			logMediaFileCacheObservation(downloadCtx, "media_download_origin_fallback", source.URL, targetPath, startedAt, err, g.Map{"drive": "cos"})
 			return downloadMediaFileCache(downloadCtx, source.URL, targetPath)
 		}
 		return nil
@@ -396,6 +459,7 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 	filePath := mediaFileCachePath(dir, key, ext)
 	metaPath := filePath + ".json"
 	if fileExists(filePath) {
+		logMediaFileCacheObservation(ctx, "media_cache_hit", source, filePath, time.Now(), nil, nil)
 		if err := touchMediaFileCacheMeta(metaPath, key, metaSource, filePath); err != nil {
 			g.Log().Warningf(ctx, "更新媒体缓存访问时间失败 path:%s err:%+v", filePath, err)
 		}
@@ -413,13 +477,19 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		}
 		partPath := fmt.Sprintf("%s.part.%d", filePath, time.Now().UnixNano())
 		_ = os.Remove(partPath)
+		downloadStartedAt := time.Now()
+		logMediaFileCacheObservation(ctx, "media_download_started", source, partPath, downloadStartedAt, nil, nil)
 		if err := downloader(ctx, source, partPath); err != nil {
+			logMediaFileCacheObservation(ctx, "media_download_failed", source, partPath, downloadStartedAt, err, nil)
 			_ = os.Remove(partPath)
 			return "", err
 		}
 		if !fileExists(partPath) {
-			return "", gerror.New("媒体下载完成但临时文件不存在")
+			err := gerror.New("媒体下载完成但临时文件不存在")
+			logMediaFileCacheObservation(ctx, "media_download_failed", source, partPath, downloadStartedAt, err, g.Map{"failureStage": "file_check"})
+			return "", err
 		}
+		logMediaFileCacheObservation(ctx, "media_download_completed", source, partPath, downloadStartedAt, nil, nil)
 		if err := os.Rename(partPath, filePath); err != nil {
 			_ = os.Remove(partPath)
 			return "", gerror.Wrap(err, "提交媒体缓存文件失败")
@@ -430,10 +500,17 @@ func cachedRemoteMediaFileWithMetaSourceAndDownloader(ctx context.Context, key s
 		scheduleMediaFileCachePrune(ctx)
 		return filePath, nil
 	})
+	waitStartedAt := time.Now()
+	waitStage := beginTelegramPublishStage(ctx, "media.cache.wait", g.Map{"sourceHost": mediaFileCacheSourceHost(source)})
+	logMediaFileCacheObservation(ctx, "media_cache_wait_started", source, "", waitStartedAt, nil, nil)
 	select {
 	case <-ctx.Done():
+		waitStage.End(ctx.Err())
+		logMediaFileCacheObservation(ctx, "media_cache_wait_failed", source, "", waitStartedAt, ctx.Err(), nil)
 		return "", ctx.Err()
 	case result := <-resultCh:
+		waitStage.End(result.Err)
+		logMediaFileCacheObservation(ctx, "media_cache_wait_finished", source, filePath, waitStartedAt, result.Err, g.Map{"shared": result.Shared})
 		if result.Err != nil {
 			return "", result.Err
 		}
@@ -536,19 +613,33 @@ func isRetryableMediaFileCacheError(ctx context.Context, err error) bool {
 // file cleanup are owned by the shared media library.
 func downloadMediaFileCacheWithClient(ctx context.Context, client *http.Client, source string, filePath string) error {
 	startedAt := time.Now()
+	ctx, httpTiming := mediaFileCacheHTTPTrace(ctx)
 	err := telegrammedia.DownloadFile(ctx, client, source, filePath, telegrammedia.TransferOptions{Attempts: 1})
 	result := "success"
 	if err != nil {
 		result = "error"
 	}
-	g.Log().Info(ctx, "媒体下载网络流量", g.Map{
+	fields := g.Map{
 		"log_type": "media_network_traffic", "event": "media_download_for_publish",
 		"role": "publish-worker", "direction": "internet_ingress", "destinationHost": mediaFileCacheSourceHost(source),
 		"downloadedFileBytes": fileSizeValue(filePath), "byteSemantics": "completed_file_size",
 		"durationMs": time.Since(startedAt).Milliseconds(), "result": result,
-	})
+		"sourceRole": "remote", "errorClass": mediaFileCacheErrorClass(err),
+	}
+	if metadata, ok := ctx.Value(mediaFileCacheObservationContextKey{}).(g.Map); ok {
+		for key, value := range metadata {
+			fields[key] = value
+		}
+	}
+	for key, value := range httpTiming() {
+		fields[key] = value
+	}
 	var status *telegrammedia.HTTPStatusError
 	if errors.As(err, &status) {
+		fields["httpStatus"] = status.StatusCode
+	}
+	g.Log().Info(ctx, "媒体下载网络流量", fields)
+	if status != nil {
 		return &mediaFileCacheHTTPStatusError{statusCode: status.StatusCode}
 	}
 	return err

@@ -306,6 +306,20 @@ func observeMediaFileCacheSource(ctx context.Context, source, result, errorClass
 	))
 }
 
+func observeVideoFileCache(ctx context.Context, event, source, result string, duration time.Duration, size int64) {
+	attrs := metric.WithAttributes(attribute.String("event", event), attribute.String("source", source), attribute.String("result", result))
+	counter, _ := publishObserveMeter.Int64Counter("xiaohuiji.media.video_download_events")
+	counter.Add(ctx, 1, attrs)
+	if event == "media_download_completed" || event == "media_download_failed" || event == "media_cache_wait_finished" || event == "media_cache_wait_failed" {
+		histogram, _ := publishObserveMeter.Float64Histogram("xiaohuiji.media.video_download_duration_seconds")
+		histogram.Record(ctx, duration.Seconds(), attrs)
+	}
+	if event == "media_download_completed" && size > 0 {
+		bytes, _ := publishObserveMeter.Int64Counter("xiaohuiji.media.video_download_bytes")
+		bytes.Add(ctx, size, attrs)
+	}
+}
+
 func observeCollectMediaScheduler(ctx context.Context, action string, tenantID, tgAccountID int64) {
 	attrs := metric.WithAttributes(
 		attribute.String("action", action),
