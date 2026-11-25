@@ -56,6 +56,9 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 		return nil, gerror.New("请选择TG账号")
 	}
 	logChannelCheckStage(ctx, "started", in.TgAccountId, in.TargetChatId, 0, startedAt, nil)
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "频道检测前刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	checkCtx, cancelCheck := context.WithTimeout(ctx, 40*time.Second)
 	res, err = s.checkAdminChannelBots(checkCtx, in, account.TenantId, true)
 	cancelCheck()
@@ -71,9 +74,6 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	logChannelCheckStage(ctx, "persist_completed", in.TgAccountId, res.TargetChatId, 0, startedAt, nil)
 	cacheCtx, cancelCache := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	s.refreshAutoDeleteChannelCache(cacheCtx)
-	if refreshErr := gatewayservice.Gateway().Refresh(cacheCtx); refreshErr != nil {
-		g.Log().Warningf(cacheCtx, "频道检查后刷新TG Bot Gateway失败：%+v", refreshErr)
-	}
 	cancelCache()
 	return res, nil
 }
