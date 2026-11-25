@@ -10,6 +10,7 @@
         <n-form-item label="服务来源">
           <n-radio-group v-model:value="model.mattingProvider">
             <n-radio-button value="aliyun">阿里云人体分割</n-radio-button>
+            <n-radio-button value="aliyun-aidge">阿里云电商智能抠图</n-radio-button>
             <n-radio-button value="tencent">腾讯云 A/B 账号</n-radio-button>
             <n-radio-button value="fapihub">FAPIHub</n-radio-button>
             <n-radio-button value="facepp">Face++ 人体抠像</n-radio-button>
@@ -37,6 +38,21 @@
               v-model:value="model.aliyunEndpoint"
               placeholder="imageseg.cn-shanghai.aliyuncs.com"
             />
+          </n-form-item>
+        </template>
+
+        <template v-else-if="model.mattingProvider === 'aliyun-aidge'">
+          <n-form-item label="AccessKey ID">
+            <n-input v-model:value="model.aliyunAccessKeyId" clearable placeholder="请输入 AccessKey ID" />
+          </n-form-item>
+          <n-form-item label="AccessKey Secret">
+            <n-input v-model:value="model.aliyunAccessKeySecret" clearable show-password-on="click" type="password" />
+          </n-form-item>
+          <n-form-item label="Aidge Endpoint">
+            <n-input v-model:value="model.aliyunEcommerceEndpoint" placeholder="aidge.ap-southeast-1.aliyuncs.com" />
+          </n-form-item>
+          <n-form-item label="结果加速域名">
+            <n-input v-model:value="model.aliyunEcommerceDomain" placeholder="可选，例如 dashscope 结果加速域名" />
           </n-form-item>
         </template>
 
@@ -151,11 +167,13 @@
       aliyunAccessKeyId: string;
       aliyunAccessKeySecret: string;
       aliyunEndpoint: string;
+      aliyunEcommerceEndpoint: string;
+      aliyunEcommerceDomain: string;
       fapiHubApiKey: string;
       fapiHubEnabled: number;
       fapiHubEndpoint: string;
       fapiHubModel: string;
-      mattingProvider: 'aliyun' | 'fapihub' | 'tencent' | 'facepp';
+      mattingProvider: 'aliyun' | 'aliyun-aidge' | 'fapihub' | 'tencent' | 'facepp';
       facePlusApiKey: string;
       facePlusApiSecret: string;
       facePlusEndpoint: string;

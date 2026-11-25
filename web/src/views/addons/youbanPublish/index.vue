@@ -869,6 +869,8 @@
       aliyunAccessKeyId: '',
       aliyunAccessKeySecret: '',
       aliyunEndpoint: 'imageseg.cn-shanghai.aliyuncs.com',
+      aliyunEcommerceEndpoint: 'aidge.ap-southeast-1.aliyuncs.com',
+      aliyunEcommerceDomain: '',
       tencentVisionEnabled: 0,
       tencentCloudSite: 'intl',
       tencentSecretId: '',

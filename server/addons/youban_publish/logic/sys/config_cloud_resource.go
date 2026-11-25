@@ -2,6 +2,12 @@ package sys
 
 import (
 	"context"
+
+	aidge "github.com/alibabacloud-go/aidge-20260428/v6/client"
+	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	util "github.com/alibabacloud-go/tea-utils/v2/service"
+	"github.com/alibabacloud-go/tea/tea"
+	credential "github.com/aliyun/credentials-go/credentials"
 	"strings"
 	"time"
 
@@ -16,51 +22,54 @@ const cloudResourceConfigCacheTTL = 10 * time.Minute
 
 func defaultCloudResourceConfig() *model.CloudResourceConfig {
 	return &model.CloudResourceConfig{
-		OcrEnabled:           0,
-		OcrTimeoutMs:         800,
-		MattingProvider:      "facepp",
-		AliyunEndpoint:       "imageseg.cn-shanghai.aliyuncs.com",
-		TencentVisionEnabled: 0,
-		TencentCloudSite:     "intl",
-		TencentRegion:        "ap-singapore",
-		TencentMattingPath:   "youban-matting",
-		TencentBdaEndpoint:   "bda.intl.tencentcloudapi.com",
-		TencentIaiEndpoint:   "iai.intl.tencentcloudapi.com",
-		FapiHubEnabled:       0,
-		FapiHubEndpoint:      "https://fapihub.com/v2/rembg/",
-		FapiHubModel:         "falcon",
-		FacePlusEndpoint:     "https://api-cn.faceplusplus.com/humanbodypp/v2/segment",
-		FacePlusConcurrency:  2,
+		OcrEnabled:              0,
+		OcrTimeoutMs:            800,
+		MattingProvider:         "facepp",
+		AliyunEndpoint:          "imageseg.cn-shanghai.aliyuncs.com",
+		AliyunEcommerceEndpoint: "aidge.ap-southeast-1.aliyuncs.com",
+		TencentVisionEnabled:    0,
+		TencentCloudSite:        "intl",
+		TencentRegion:           "ap-singapore",
+		TencentMattingPath:      "youban-matting",
+		TencentBdaEndpoint:      "bda.intl.tencentcloudapi.com",
+		TencentIaiEndpoint:      "iai.intl.tencentcloudapi.com",
+		FapiHubEnabled:          0,
+		FapiHubEndpoint:         "https://fapihub.com/v2/rembg/",
+		FapiHubModel:            "falcon",
+		FacePlusEndpoint:        "https://api-cn.faceplusplus.com/humanbodypp/v2/segment",
+		FacePlusConcurrency:     2,
 	}
 }
 
 func cloudResourceConfigMap(conf *model.CloudResourceConfig) g.Map {
 	return g.Map{
-		"ocrEnabled":            conf.OcrEnabled,
-		"ocrEndpoint":           conf.OcrEndpoint,
-		"ocrTimeoutMs":          conf.OcrTimeoutMs,
-		"ocrBlockedKeywords":    conf.OcrBlockedKeywords,
-		"mattingProvider":       conf.MattingProvider,
-		"aliyunAccessKeyId":     conf.AliyunAccessKeyId,
-		"aliyunAccessKeySecret": conf.AliyunAccessKeySecret,
-		"aliyunEndpoint":        conf.AliyunEndpoint,
-		"tencentVisionEnabled":  conf.TencentVisionEnabled,
-		"tencentCloudSite":      conf.TencentCloudSite,
-		"tencentSecretId":       conf.TencentSecretId,
-		"tencentSecretKey":      conf.TencentSecretKey,
-		"tencentRegion":         conf.TencentRegion,
-		"tencentMattingBucket":  conf.TencentMattingBucket,
-		"tencentMattingPath":    conf.TencentMattingPath,
-		"tencentBdaEndpoint":    conf.TencentBdaEndpoint,
-		"tencentIaiEndpoint":    conf.TencentIaiEndpoint,
-		"fapiHubEnabled":        conf.FapiHubEnabled,
-		"fapiHubApiKey":         conf.FapiHubApiKey,
-		"fapiHubEndpoint":       conf.FapiHubEndpoint,
-		"fapiHubModel":          conf.FapiHubModel,
-		"facePlusApiKey":        conf.FacePlusApiKey,
-		"facePlusApiSecret":     conf.FacePlusApiSecret,
-		"facePlusEndpoint":      conf.FacePlusEndpoint,
-		"facePlusConcurrency":   conf.FacePlusConcurrency,
+		"ocrEnabled":              conf.OcrEnabled,
+		"ocrEndpoint":             conf.OcrEndpoint,
+		"ocrTimeoutMs":            conf.OcrTimeoutMs,
+		"ocrBlockedKeywords":      conf.OcrBlockedKeywords,
+		"mattingProvider":         conf.MattingProvider,
+		"aliyunAccessKeyId":       conf.AliyunAccessKeyId,
+		"aliyunAccessKeySecret":   conf.AliyunAccessKeySecret,
+		"aliyunEndpoint":          conf.AliyunEndpoint,
+		"aliyunEcommerceEndpoint": conf.AliyunEcommerceEndpoint,
+		"aliyunEcommerceDomain":   conf.AliyunEcommerceDomain,
+		"tencentVisionEnabled":    conf.TencentVisionEnabled,
+		"tencentCloudSite":        conf.TencentCloudSite,
+		"tencentSecretId":         conf.TencentSecretId,
+		"tencentSecretKey":        conf.TencentSecretKey,
+		"tencentRegion":           conf.TencentRegion,
+		"tencentMattingBucket":    conf.TencentMattingBucket,
+		"tencentMattingPath":      conf.TencentMattingPath,
+		"tencentBdaEndpoint":      conf.TencentBdaEndpoint,
+		"tencentIaiEndpoint":      conf.TencentIaiEndpoint,
+		"fapiHubEnabled":          conf.FapiHubEnabled,
+		"fapiHubApiKey":           conf.FapiHubApiKey,
+		"fapiHubEndpoint":         conf.FapiHubEndpoint,
+		"fapiHubModel":            conf.FapiHubModel,
+		"facePlusApiKey":          conf.FacePlusApiKey,
+		"facePlusApiSecret":       conf.FacePlusApiSecret,
+		"facePlusEndpoint":        conf.FacePlusEndpoint,
+		"facePlusConcurrency":     conf.FacePlusConcurrency,
 	}
 }
 
@@ -69,6 +78,28 @@ func validateCloudResourceCredential(ctx context.Context, conf *model.CloudResou
 		_, err := aliyunSegmentBodyFromURL(ctx, aliyunSegmentBodyTestImageURL, conf)
 		if err != nil {
 			return gerror.Wrap(err, "阿里云 SegmentBody 配置校验失败")
+		}
+		return nil
+	}
+	if conf.MattingProvider == "aliyun-aidge" {
+		cred, err := credential.NewCredential(&credential.Config{AccessKeyId: tea.String(conf.AliyunAccessKeyId), AccessKeySecret: tea.String(conf.AliyunAccessKeySecret)})
+		if err != nil {
+			return gerror.Wrap(err, "初始化阿里云电商抠图凭证失败")
+		}
+		endpoint := conf.AliyunEcommerceEndpoint
+		if endpoint == "" {
+			endpoint = "aidge.ap-southeast-1.aliyuncs.com"
+		}
+		client, err := aidge.NewClient(&openapi.Config{Credential: cred, Endpoint: tea.String(endpoint)})
+		if err != nil {
+			return gerror.Wrap(err, "初始化阿里云电商抠图客户端失败")
+		}
+		response, err := client.ImageMattingWithOptions(&aidge.ImageMattingRequest{ImageUrl: tea.String(aliyunSegmentBodyTestImageURL), BackGroundType: tea.String("TRANSPARENT")}, &util.RuntimeOptions{})
+		if err != nil {
+			return gerror.Wrap(err, "阿里云电商 ImageMatting 配置校验失败")
+		}
+		if response == nil || response.Body == nil || response.Body.Data == nil {
+			return gerror.New("阿里云电商 ImageMatting 未返回结果")
 		}
 		return nil
 	}

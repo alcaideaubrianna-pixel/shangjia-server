@@ -5,6 +5,7 @@ export const cloudResourceOptions = [
 
 export const cloudResourceProviderOptions = [
   { label: '阿里云', value: 'aliyun' },
+  { label: '阿里云电商', value: 'aliyun-aidge' },
   { label: '腾讯云', value: 'tencent' },
   { label: 'FAPIHub', value: 'fapihub' },
   { label: '历史数据', value: 'legacy' },

@@ -39,7 +39,7 @@ func antiScanProviderIntEnv(name string, fallback, max int) int {
 func acquireAntiScanProvider(ctx context.Context, provider string) (func(), error) {
 	limit, interval := 1, time.Duration(0)
 	switch provider {
-	case "aliyun":
+	case "aliyun", "aliyun-aidge":
 		limit = antiScanProviderIntEnv("YOUBAN_ALIYUN_MATTING_CONCURRENCY", 5, 20)
 	case "tencent":
 		limit = antiScanProviderIntEnv("YOUBAN_TENCENT_MATTING_CONCURRENCY", 4, 20)

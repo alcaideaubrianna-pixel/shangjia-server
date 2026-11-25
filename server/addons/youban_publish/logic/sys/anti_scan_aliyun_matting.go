@@ -8,14 +8,18 @@ import (
 	"image"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	aidge "github.com/alibabacloud-go/aidge-20260428/v6/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	imageseg "github.com/alibabacloud-go/imageseg-20191230/v4/client"
+	util "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/dara"
 	"github.com/alibabacloud-go/tea/tea"
+	credential "github.com/aliyun/credentials-go/credentials"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tencentyun/cos-go-sdk-v5"
@@ -89,6 +93,101 @@ func aliyunCOSPortraitMatting(ctx context.Context, imageBytes []byte, imageHash 
 	}
 	g.Log().Infof(ctx, "防扫图阶段完成 stage:aliyun_result_upload durationMs:%d outputBytes:%d imageHash:%s", time.Since(resultUploadStartedAt).Milliseconds(), len(segmentResult.ImageBytes), imageHash)
 	return storager.LastUrl(ctx, resultKey, consts.UploadDriveCos), nil
+}
+
+// aliyunAidgePortraitMatting calls Alibaba Cloud Aidge ImageMatting and stores
+// the temporary result in the configured application storage.
+func aliyunAidgePortraitMatting(ctx context.Context, imageBytes []byte, imageHash string, conf *model.CloudResourceConfig) (string, error) {
+	config := storager.GetConfig()
+	if config == nil || config.Drive != consts.UploadDriveCos {
+		return "", gerror.New("阿里云电商抠图要求上传驱动为COS")
+	}
+	if conf == nil || strings.TrimSpace(conf.AliyunAccessKeyId) == "" || strings.TrimSpace(conf.AliyunAccessKeySecret) == "" {
+		return "", gerror.New("阿里云电商抠图缺少 AccessKey ID 或 AccessKey Secret")
+	}
+	normalized, contentType, ext, err := prepareCloudMattingImageBytes(imageBytes, 1600)
+	if err != nil {
+		return "", err
+	}
+	client, err := storager.NewCosClient()
+	if err != nil {
+		return "", err
+	}
+	basePath := strings.Trim(strings.TrimSpace(config.CosPath), "/")
+	sourceKey := basePath + "/anti-scan/aidge-source/" + imageHash + "." + ext
+	_, err = client.Object.Put(ctx, sourceKey, bytes.NewReader(normalized), &cos.ObjectPutOptions{ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+		ContentType:  contentType,
+		CacheControl: "private, max-age=300",
+	}})
+	if err != nil {
+		return "", gerror.Wrap(err, "保存阿里云电商抠图原图失败")
+	}
+	sourceURL, err := client.Object.GetPresignedURL(ctx, http.MethodGet, sourceKey, config.CosSecretId, config.CosSecretKey, 10*time.Minute, nil)
+	if err != nil {
+		return "", gerror.Wrap(err, "生成阿里云电商抠图原图地址失败")
+	}
+	cred, err := credential.NewCredential(&credential.Config{
+		AccessKeyId:     tea.String(strings.TrimSpace(conf.AliyunAccessKeyId)),
+		AccessKeySecret: tea.String(strings.TrimSpace(conf.AliyunAccessKeySecret)),
+	})
+	if err != nil {
+		return "", gerror.Wrap(err, "初始化阿里云电商抠图凭证失败")
+	}
+	endpoint := strings.TrimSpace(conf.AliyunEcommerceEndpoint)
+	if endpoint == "" {
+		endpoint = "aidge.ap-southeast-1.aliyuncs.com"
+	}
+	aidgeClient, err := aidge.NewClient(&openapi.Config{Credential: cred, Endpoint: tea.String(endpoint)})
+	if err != nil {
+		return "", gerror.Wrap(err, "初始化阿里云电商抠图客户端失败")
+	}
+	startedAt := time.Now()
+	response, err := aidgeClient.ImageMattingWithOptions(&aidge.ImageMattingRequest{
+		ImageUrl:       tea.String(sourceURL.String()),
+		BackGroundType: tea.String("TRANSPARENT"),
+	}, &util.RuntimeOptions{})
+	if err != nil {
+		return "", gerror.Wrap(err, "调用阿里云电商 ImageMatting 失败")
+	}
+	if response == nil || response.Body == nil || response.Body.Data == nil || strings.TrimSpace(tea.StringValue(response.Body.Data.ImageUrl)) == "" {
+		return "", gerror.New("阿里云电商 ImageMatting 未返回结果图片")
+	}
+	resultURL := tea.StringValue(response.Body.Data.ImageUrl)
+	if domain := strings.TrimSpace(conf.AliyunEcommerceDomain); domain != "" {
+		if parsed, parseErr := url.Parse(resultURL); parseErr == nil {
+			parsed.Scheme = "https"
+			parsed.Host = strings.TrimPrefix(strings.TrimPrefix(domain, "https://"), "http://")
+			resultURL = parsed.String()
+		}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, resultURL, nil)
+	if err != nil {
+		return "", gerror.Wrap(err, "创建阿里云电商结果下载请求失败")
+	}
+	downloadResponse, err := aliyunResultHTTPClient.Do(request)
+	if err != nil {
+		return "", gerror.Wrap(err, "下载阿里云电商结果图片失败")
+	}
+	defer downloadResponse.Body.Close()
+	if downloadResponse.StatusCode != http.StatusOK {
+		return "", gerror.Newf("下载阿里云电商结果图片失败，HTTP状态码：%d", downloadResponse.StatusCode)
+	}
+	resultBytes, err := io.ReadAll(io.LimitReader(downloadResponse.Body, 12*1024*1024+1))
+	if err != nil {
+		return "", gerror.Wrap(err, "读取阿里云电商结果图片失败")
+	}
+	if len(resultBytes) == 0 || len(resultBytes) > 12*1024*1024 {
+		return "", gerror.New("阿里云电商结果图片大小不合法")
+	}
+	if _, _, err = image.DecodeConfig(bytes.NewReader(resultBytes)); err != nil {
+		return "", gerror.Wrap(err, "阿里云电商结果图片不是有效图片")
+	}
+	segmentURL, err := uploadAntiScanSegment(ctx, resultBytes, imageHash)
+	if err != nil {
+		return "", err
+	}
+	g.Log().Infof(ctx, "防扫图阶段完成 stage:aliyun_aidge_matting durationMs:%d outputBytes:%d endpoint:%s imageHash:%s", time.Since(startedAt).Milliseconds(), len(resultBytes), endpoint, imageHash)
+	return segmentURL, nil
 }
 
 func aliyunSegmentBodyFromURL(ctx context.Context, imageURL string, conf *model.CloudResourceConfig) (*aliyunSegmentBodyResult, error) {

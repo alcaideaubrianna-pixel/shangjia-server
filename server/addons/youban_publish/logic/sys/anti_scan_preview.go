@@ -332,7 +332,7 @@ func antiScanMediaSegmentCacheKey(mediaId int64, provider string) string {
 }
 
 func invalidateAntiScanMediaSegmentCache(ctx context.Context, mediaId int64) error {
-	for _, provider := range []string{"facepp", "aliyun", "tencent", "fapihub"} {
+	for _, provider := range []string{"facepp", "aliyun", "aliyun-aidge", "tencent", "fapihub"} {
 		if _, err := cache.Instance().Remove(ctx, antiScanMediaSegmentCacheKey(mediaId, provider)); err != nil {
 			g.Log().Warningf(ctx, "清除媒体人像分割快速缓存失败 mediaId:%d provider:%s err:%+v", mediaId, provider, err)
 		}
@@ -524,15 +524,19 @@ func (s *sSysPublish) createAntiScanMatting(ctx context.Context, imageHash strin
 				})
 			}
 		}
-	} else if provider == "aliyun" {
+	} else if provider == "aliyun" || provider == "aliyun-aidge" {
 		providerStartedAt := time.Now()
 		release, gateErr := acquireAntiScanProvider(ctx, "aliyun")
 		if gateErr != nil {
 			return "", gateErr
 		}
 		defer release()
-		segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
-		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderAliyun, err == nil, time.Since(providerStartedAt))
+		if provider == "aliyun-aidge" {
+			segmentURL, err = aliyunAidgePortraitMatting(ctx, imageBytes, imageHash, conf)
+		} else {
+			segmentURL, err = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
+		}
+		recordMattingProviderUsage(ctx, usageOwner, provider, err == nil, time.Since(providerStartedAt))
 	} else if provider == "tencent" {
 		providerName = "tencent-ci-matting"
 		var result *tencentPortraitMattingResult
@@ -606,7 +610,7 @@ func fallbackErrorText(err error, result *tencentPortraitMattingResult) string {
 func antiScanFallbackProvider() string {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("YOUBAN_ANTISCAN_FALLBACK_PROVIDER")))
 	switch provider {
-	case "aliyun", "tencent", "fapihub":
+	case "aliyun", "aliyun-aidge", "tencent", "fapihub":
 		return provider
 	default:
 		return ""
@@ -624,9 +628,15 @@ func (s *sSysPublish) createAntiScanFallback(ctx context.Context, provider, imag
 	defer release()
 	started := time.Now()
 	switch provider {
-	case "aliyun":
-		url, callErr := aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
-		recordMattingProviderUsage(ctx, usageOwner, sysin.CloudResourceProviderAliyun, callErr == nil, time.Since(started))
+	case "aliyun", "aliyun-aidge":
+		var url string
+		var callErr error
+		if provider == "aliyun-aidge" {
+			url, callErr = aliyunAidgePortraitMatting(ctx, imageBytes, imageHash, conf)
+		} else {
+			url, callErr = aliyunCOSPortraitMatting(ctx, imageBytes, imageHash, conf)
+		}
+		recordMattingProviderUsage(ctx, usageOwner, provider, callErr == nil, time.Since(started))
 		return url, callErr
 	case "tencent":
 		result, callErr := tencentCOSPortraitMatting(ctx, imageBytes, imageHash, conf, false)
@@ -660,6 +670,9 @@ func (s *sSysPublish) createAntiScanFallback(ctx context.Context, provider, imag
 func antiScanMattingProvider(conf *model.CloudResourceConfig) string {
 	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "facepp") {
 		return "facepp"
+	}
+	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "aliyun-aidge") {
+		return "aliyun-aidge"
 	}
 	if conf != nil && strings.EqualFold(strings.TrimSpace(conf.MattingProvider), "aliyun") {
 		return "aliyun"

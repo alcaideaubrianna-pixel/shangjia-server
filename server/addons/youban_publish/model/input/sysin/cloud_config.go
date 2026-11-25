@@ -15,6 +15,7 @@ const (
 	CloudResourceTypeBackgroundMatting = "background_matting"
 	CloudResourceTypeFaceDetection     = "face_detection"
 	CloudResourceProviderAliyun        = "aliyun"
+	CloudResourceProviderAliyunAidge   = "aliyun-aidge"
 	CloudResourceProviderTencent       = "tencent"
 	CloudResourceProviderFapiHub       = "fapihub"
 	CloudResourceProviderFacePlus      = "facepp"
@@ -153,7 +154,7 @@ func (in *CloudResourceUsageQueryInp) Filter(ctx context.Context) error {
 		return gerror.New("云资源类型不合法")
 	}
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
-	if in.Provider != "" && in.Provider != CloudResourceProviderAliyun && in.Provider != CloudResourceProviderTencent && in.Provider != CloudResourceProviderFapiHub && in.Provider != CloudResourceProviderFacePlus && in.Provider != CloudResourceProviderLegacy {
+	if in.Provider != "" && in.Provider != CloudResourceProviderAliyun && in.Provider != CloudResourceProviderAliyunAidge && in.Provider != CloudResourceProviderTencent && in.Provider != CloudResourceProviderFapiHub && in.Provider != CloudResourceProviderFacePlus && in.Provider != CloudResourceProviderLegacy {
 		return gerror.New("云资源服务来源不合法")
 	}
 	return nil
@@ -227,6 +228,8 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	in.AliyunAccessKeyId = strings.TrimSpace(in.AliyunAccessKeyId)
 	in.AliyunAccessKeySecret = strings.TrimSpace(in.AliyunAccessKeySecret)
 	in.AliyunEndpoint = strings.TrimSpace(in.AliyunEndpoint)
+	in.AliyunEcommerceEndpoint = strings.TrimSpace(in.AliyunEcommerceEndpoint)
+	in.AliyunEcommerceDomain = strings.TrimRight(strings.TrimSpace(in.AliyunEcommerceDomain), "/")
 	in.TencentSecretId = strings.TrimSpace(in.TencentSecretId)
 	in.TencentSecretKey = strings.TrimSpace(in.TencentSecretKey)
 	in.TencentCloudSite = strings.TrimSpace(in.TencentCloudSite)
@@ -249,7 +252,7 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	if in.MattingProvider == "" {
 		in.MattingProvider = "aliyun"
 	}
-	if in.MattingProvider != "aliyun" && in.MattingProvider != "tencent" && in.MattingProvider != "fapihub" && in.MattingProvider != "facepp" {
+	if in.MattingProvider != "aliyun" && in.MattingProvider != "aliyun-aidge" && in.MattingProvider != "tencent" && in.MattingProvider != "fapihub" && in.MattingProvider != "facepp" {
 		return gerror.New("人像抠图来源不合法")
 	}
 	if err := checkSwitch(in.FapiHubEnabled, "FAPIHub 抠图开关"); err != nil {
@@ -313,8 +316,8 @@ func filterCloudResourceConfig(ctx context.Context, in *model.CloudResourceConfi
 	if in.MattingProvider == "tencent" && in.TencentMattingPath == "" {
 		in.TencentMattingPath = "youban-matting"
 	}
-	if in.MattingProvider == "aliyun" && (in.AliyunAccessKeyId == "" || in.AliyunAccessKeySecret == "") {
-		return gerror.New("使用阿里云人体分割必须配置 AccessKey ID 和 AccessKey Secret")
+	if (in.MattingProvider == "aliyun" || in.MattingProvider == "aliyun-aidge") && (in.AliyunAccessKeyId == "" || in.AliyunAccessKeySecret == "") {
+		return gerror.New("使用阿里云抠图服务必须配置 AccessKey ID 和 AccessKey Secret")
 	}
 	if in.MattingProvider == "facepp" && (in.FacePlusApiKey == "" || in.FacePlusApiSecret == "") {
 		return gerror.New("使用 Face++ 人体抠图必须配置 API Key 和 API Secret")

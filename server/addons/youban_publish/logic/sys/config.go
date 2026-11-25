@@ -7,6 +7,11 @@ import (
 	"strings"
 	"time"
 
+	aidge "github.com/alibabacloud-go/aidge-20260428/v6/client"
+	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	util "github.com/alibabacloud-go/tea-utils/v2/service"
+	"github.com/alibabacloud-go/tea/tea"
+	credential "github.com/aliyun/credentials-go/credentials"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -386,7 +391,30 @@ func (s *sSysConfig) CloudResourceConfigTest(ctx context.Context, in *sysin.Clou
 			in.FacePlusApiSecret = oldConf.FacePlusApiSecret
 		}
 	}
-	if in.MattingProvider == "aliyun" {
+	if in.MattingProvider == "aliyun" || in.MattingProvider == "aliyun-aidge" {
+		if in.MattingProvider == "aliyun-aidge" {
+			startedAt := time.Now()
+			cred, credErr := credential.NewCredential(&credential.Config{AccessKeyId: tea.String(in.AliyunAccessKeyId), AccessKeySecret: tea.String(in.AliyunAccessKeySecret)})
+			if credErr != nil {
+				return nil, gerror.Wrap(credErr, "初始化阿里云电商抠图凭证失败")
+			}
+			endpoint := in.AliyunEcommerceEndpoint
+			if endpoint == "" {
+				endpoint = "aidge.ap-southeast-1.aliyuncs.com"
+			}
+			aidgeClient, clientErr := aidge.NewClient(&openapi.Config{Credential: cred, Endpoint: tea.String(endpoint)})
+			if clientErr != nil {
+				return nil, gerror.Wrap(clientErr, "初始化阿里云电商抠图客户端失败")
+			}
+			response, callErr := aidgeClient.ImageMattingWithOptions(&aidge.ImageMattingRequest{ImageUrl: tea.String(aliyunSegmentBodyTestImageURL), BackGroundType: tea.String("TRANSPARENT")}, &util.RuntimeOptions{})
+			if callErr != nil {
+				return nil, gerror.Wrap(callErr, "阿里云电商 ImageMatting 测试失败")
+			}
+			if response == nil || response.Body == nil || response.Body.Data == nil {
+				return nil, gerror.New("阿里云电商 ImageMatting 未返回结果")
+			}
+			return &sysin.CloudResourceConfigTestModel{Provider: "aliyun-aidge", ApiDurationMs: time.Since(startedAt).Milliseconds(), TotalDurationMs: time.Since(startedAt).Milliseconds(), OutputBytes: 0, RequestId: tea.StringValue(response.Body.RequestId)}, nil
+		}
 		var result *aliyunSegmentBodyResult
 		result, err = aliyunSegmentBodyFromURL(ctx, aliyunSegmentBodyTestImageURL, &in.CloudResourceConfig)
 		if err != nil {
