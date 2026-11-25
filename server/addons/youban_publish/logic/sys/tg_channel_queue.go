@@ -198,6 +198,8 @@ type telegramChannelQueueClaim struct {
 	Urgent        bool
 	History       bool
 	PreserveOrder bool
+	// ReleaseOrder requires a successful primary read proving ownership is no longer needed.
+	ReleaseOrder bool
 }
 
 func removeTelegramChannelJob(ctx context.Context, channelID, jobID int64) error {
@@ -308,7 +310,7 @@ func settleTelegramChannelClaim(ctx context.Context, claim telegramChannelQueueC
  if ARGV[6]=='1' then
  local owner=redis.call('GET',KEYS[8]); if owner and owner~=ARGV[2] then return 0 end
  redis.call('SET',KEYS[8],ARGV[2],'PX',ARGV[7])
- elseif ARGV[3]=='0' and redis.call('GET',KEYS[8])==ARGV[2] then redis.call('DEL',KEYS[8]) end
+ elseif (ARGV[3]=='0' or ARGV[8]=='1') and redis.call('GET',KEYS[8])==ARGV[2] then redis.call('DEL',KEYS[8]) end
  if ARGV[3]=='1' and not redis.call('ZSCORE',KEYS[1],ARGV[2]) and not redis.call('ZSCORE',KEYS[2],ARGV[2]) and not redis.call('ZSCORE',KEYS[3],ARGV[2]) then
  local score=tonumber(ARGV[4])
  if redis.call('HGET',KEYS[4],'order_woken')==ARGV[2] then score=score-score%2000000000000+now end
@@ -323,7 +325,11 @@ func settleTelegramChannelClaim(ctx context.Context, claim telegramChannelQueueC
 		preserve = "1"
 	}
 	fields["preserveOrder"] = claim.PreserveOrder
-	value, err := telegramChannelRedisDo(ctx, "EVAL", script, 8, telegramChannelUrgentQueueKey(claim.ChannelID), telegramChannelQueueKey(claim.ChannelID), telegramChannelHistoryQueueKey(claim.ChannelID), telegramChannelProcessingKey(claim.ChannelID), telegramChannelProcessingDueKey, telegramChannelActiveSetKey, telegramChannelQueueKeyForPriority(claim.ChannelID, priority), telegramChannelOrderOwnerKey(claim.ChannelID), claim.Token, strconv.FormatInt(claim.JobID, 10), mode, telegramChannelQueueScore(priority, at, claim.JobID), strconv.FormatInt(claim.ChannelID, 10), preserve, telegramChannelClaimTTL.Milliseconds())
+	release := "0"
+	if claim.ReleaseOrder && !claim.PreserveOrder {
+		release = "1"
+	}
+	value, err := telegramChannelRedisDo(ctx, "EVAL", script, 8, telegramChannelUrgentQueueKey(claim.ChannelID), telegramChannelQueueKey(claim.ChannelID), telegramChannelHistoryQueueKey(claim.ChannelID), telegramChannelProcessingKey(claim.ChannelID), telegramChannelProcessingDueKey, telegramChannelActiveSetKey, telegramChannelQueueKeyForPriority(claim.ChannelID, priority), telegramChannelOrderOwnerKey(claim.ChannelID), claim.Token, strconv.FormatInt(claim.JobID, 10), mode, telegramChannelQueueScore(priority, at, claim.JobID), strconv.FormatInt(claim.ChannelID, 10), preserve, telegramChannelClaimTTL.Milliseconds(), release)
 	fields["durationMs"] = time.Since(startedAt).Milliseconds()
 	if err != nil {
 		fields["reason"] = "redis_error"

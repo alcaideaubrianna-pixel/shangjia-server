@@ -1045,6 +1045,13 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 	inspector := asynq.NewInspector(telegramQueueRedisOpt(ctx))
 	defer inspector.Close()
 	for _, job := range jobs {
+		if err := ctx.Err(); err != nil {
+			observeErr = err
+			return err
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < time.Second {
+			break
+		}
 		if job.Id <= 0 {
 			continue
 		}
@@ -1108,7 +1115,18 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		return gerror.Wrap(err, "读取已重置TG任务失败")
 	}
 	for _, job := range updatedJobs {
+		if err := ctx.Err(); err != nil {
+			observeErr = err
+			return err
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < time.Second {
+			break
+		}
 		if err := s.rearmTelegramJobOutbox(ctx, job.Id, 0); err != nil {
+			if ctx.Err() != nil {
+				observeErr = ctx.Err()
+				return ctx.Err()
+			}
 			g.Log().Warningf(ctx, "重新激活TG任务Outbox失败 job:%d err:%+v", job.Id, err)
 			continue
 		}
@@ -1116,6 +1134,10 @@ func (s *sSysPublish) recoverStaleTelegramDispatchJobs(ctx context.Context, limi
 		// itself disappeared. A recovery enqueue must create a fresh task; the
 		// database transition in the worker remains the delivery idempotency gate.
 		if enqueueErr := s.EnqueueTelegramJob(ctx, job.Id, 0, false); enqueueErr != nil {
+			if ctx.Err() != nil {
+				observeErr = ctx.Err()
+				return ctx.Err()
+			}
 			g.Log().Warningf(ctx, "重新入队调度中断TG任务失败 job:%d err:%+v", job.Id, enqueueErr)
 		}
 	}

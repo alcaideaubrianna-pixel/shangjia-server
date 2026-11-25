@@ -311,11 +311,12 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 		hold := time.Now().Add(time.Second).UnixMilli()
 		if refreshed, reloadErr := s.telegramJobById(ctx, jobID); reloadErr == nil {
 			job = refreshed
+			claim.PreserveOrder = telegramChannelJobOwnsOrder(job)
+			claim.ReleaseOrder = !claim.PreserveOrder
 		} else {
 			// A failed reload cannot prove that no display became visible.
 			claim.PreserveOrder = true
 		}
-		claim.PreserveOrder = claim.PreserveOrder || telegramChannelJobOwnsOrder(job)
 		hold = telegramChannelDispatchDueAt(job.NextRetryAt, time.Second, time.Now()).UnixMilli()
 		priority := job.Priority
 		if priority <= 0 {
@@ -364,7 +365,8 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 	// SendTelegramJob may return nil when another sender owns the lease. Do
 	// not lose the popped item in that case; only terminal states are acked.
 	if job, loadErr := s.telegramJobById(ctx, jobID); loadErr == nil {
-		claim.PreserveOrder = claim.PreserveOrder || telegramChannelJobOwnsOrder(job)
+		claim.PreserveOrder = telegramChannelJobOwnsOrder(job)
+		claim.ReleaseOrder = !claim.PreserveOrder
 		switch {
 		case isTelegramChannelJobTerminal(job):
 			terminal = true
