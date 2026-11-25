@@ -138,3 +138,23 @@ func TestHistoricalIntroFeePolicyBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFieldsHistoricalAmounts(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want Fields
+	}{
+		{"domestic", "介绍费：国内7888，国外12888", Fields{FirstAmount: "7888", ForeignAmount: "12888"}},
+		{"prefix source", "阿泽介绍费7888", Fields{FirstAmount: "7888", FirstSuffix: "阿泽"}},
+		{"joined source", "介绍费7888情诗w174", Fields{FirstAmount: "7888"}},
+		{"profile numbers ignored", "身高168\n介绍费7888\n年龄22", Fields{FirstAmount: "7888"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ParseFields(tc.text); got != tc.want {
+				t.Fatalf("ParseFields() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}

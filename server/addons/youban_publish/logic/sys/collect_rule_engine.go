@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -57,50 +56,12 @@ type collectIntroFeeFields struct {
 }
 
 func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
-	clean := normalizeCollectKeywordText(text)
-	// Only numbers on the fee line are fee amounts. Other profile fields may
-	// contain ages, IDs, heights, etc. and must never become domestic/foreign fees.
-	feeLineFound := false
-	for _, line := range strings.Split(clean, "\n") {
-		if collectFeeKeywordPattern.MatchString(line) {
-			clean = strings.TrimSpace(line)
-			feeLineFound = true
-			break
-		}
+	parsed := introfee.ParseFields(text)
+	return collectIntroFeeFields{
+		FirstAmount:   parsed.FirstAmount,
+		FirstSuffix:   parsed.FirstSuffix,
+		ForeignAmount: parsed.ForeignAmount,
 	}
-	fields := collectIntroFeeFields{}
-	if !feeLineFound {
-		return fields
-	}
-	amounts := collectNumberRule.FindAllString(clean, -1)
-	if len(amounts) > 0 {
-		fields.FirstAmount = strings.Join(strings.Fields(amounts[0]), " ")
-	}
-	if len(amounts) > 1 && strings.Contains(clean, "国外") {
-		fields.ForeignAmount = strings.Join(strings.Fields(amounts[1]), " ")
-	}
-	if fields.FirstAmount != "" {
-		feeKeyword := collectFeeKeywordPattern.FindString(clean)
-		if feeIndex := strings.Index(clean, feeKeyword); feeKeyword != "" && feeIndex >= 0 && feeIndex+len(feeKeyword) < len(clean) {
-			afterFee := strings.TrimSpace(strings.TrimLeft(clean[feeIndex+len(feeKeyword):], collectIntroFeeSeparatorChars))
-			afterFee = strings.TrimSpace(strings.TrimLeft(afterFee, collectIntroFeeSeparatorChars))
-			if afterFee != "" && !strings.Contains(afterFee, fields.FirstAmount) {
-				fields.FirstSuffix = afterFee
-			}
-		}
-		if index := strings.Index(clean, fields.FirstAmount); index > 0 {
-			prefix := strings.TrimSpace(clean[:index])
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
-			prefix = strings.TrimSpace(strings.TrimPrefix(prefix, feeKeyword))
-			prefix = strings.TrimSpace(strings.TrimLeft(prefix, collectIntroFeeSeparatorChars))
-			prefix = strings.TrimSpace(strings.TrimRight(prefix, collectIntroFeeSeparatorChars))
-			if prefix != "" && !strings.Contains(prefix, "国内") && !strings.Contains(prefix, "国外") {
-				fields.FirstSuffix = prefix
-			}
-		}
-	}
-	return fields
 }
 
 // authoritativeCollectRawText removes an already-processed copy that can be
@@ -367,107 +328,6 @@ func preserveCollectCriticalProfileLines(original, processed string) string {
 func shouldDropCollectStandaloneCodeCaption(text string, mediaCount int) bool {
 	text = strings.TrimSpace(text)
 	return mediaCount == 1 && collectStandaloneCodeCaptionRule.MatchString(text)
-}
-
-type collectDedupeMaterial struct {
-	mediaKey        string
-	textHash        string
-	imagePHashKey   string
-	mediaCount      int
-	mediaTotal      int
-	imagePHashCount int
-	imageTotal      int
-}
-
-type collectDedupeSignature struct {
-	layer string
-	value string
-	total int
-	count int
-}
-
-func (material collectDedupeMaterial) signatures(includePHash bool) []collectDedupeSignature {
-	items := make([]collectDedupeSignature, 0, 3)
-	if material.textHash != "" {
-		items = append(items, collectDedupeSignature{layer: "text_hash", value: material.textHash})
-	}
-	if material.mediaKey != "" && material.mediaTotal > 0 && material.mediaCount == material.mediaTotal {
-		items = append(items, collectDedupeSignature{layer: "media_fingerprint", value: material.mediaKey, total: material.mediaTotal, count: material.mediaCount})
-	}
-	if includePHash && material.imagePHashKey != "" && material.imageTotal > 0 && material.imagePHashCount == material.imageTotal {
-		items = append(items, collectDedupeSignature{layer: "image_phash", value: material.imagePHashKey, total: material.imageTotal, count: material.imagePHashCount})
-	}
-	return items
-}
-
-func collectDedupeMaterialFromItems(textHash string, items []collectMediaItem) collectDedupeMaterial {
-	mediaKey := collectMediaFingerprintSetKey(items)
-	imagePHashKey, imagePHashCount := collectImagePHashSetKey(items)
-	imageTotal := 0
-	for _, item := range items {
-		if mediaType := strings.ToLower(strings.TrimSpace(item.Type)); mediaType == "photo" || mediaType == "image" {
-			imageTotal++
-		}
-	}
-	mediaCount := len(collectMediaFingerprintValues(items))
-	if mediaCount != len(items) {
-		mediaKey = ""
-	}
-	if imagePHashCount != imageTotal {
-		imagePHashKey = ""
-	}
-	textHash = strings.TrimSpace(textHash)
-	if textHash == collectHash("") {
-		textHash = ""
-	}
-	return collectDedupeMaterial{
-		mediaKey:        mediaKey,
-		textHash:        textHash,
-		imagePHashKey:   imagePHashKey,
-		mediaCount:      mediaCount,
-		mediaTotal:      len(items),
-		imagePHashCount: imagePHashCount,
-		imageTotal:      imageTotal,
-	}
-}
-
-func collectMediaFingerprintSetKey(items []collectMediaItem) string {
-	values := collectMediaFingerprintValues(items)
-	if len(values) == 0 {
-		return ""
-	}
-	return collectHash(strings.Join(values, "|"))
-}
-
-func collectMediaFingerprintValues(items []collectMediaItem) []string {
-	values := make([]string, 0, len(items))
-	for _, item := range items {
-		fingerprint := strings.ToLower(strings.TrimSpace(item.FileMd5))
-		if fingerprint == "" {
-			continue
-		}
-		values = append(values, strings.ToLower(strings.TrimSpace(item.Type))+":md5:"+fingerprint)
-	}
-	sort.Strings(values)
-	return values
-}
-
-func collectImagePHashSetKey(items []collectMediaItem) (string, int) {
-	values := make([]string, 0, len(items))
-	for _, item := range items {
-		mediaType := strings.ToLower(strings.TrimSpace(item.Type))
-		if mediaType != "photo" && mediaType != "image" {
-			continue
-		}
-		if hash := collectMediaPHash(item); hash != "" {
-			values = append(values, hash)
-		}
-	}
-	sort.Strings(values)
-	if len(values) == 0 {
-		return "", 0
-	}
-	return collectHash(strings.Join(values, "|")), len(values)
 }
 
 func trimCollectValues(values []string) []string {
