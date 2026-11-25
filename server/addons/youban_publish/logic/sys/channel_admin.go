@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
+	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/internal/library/cache"
 
@@ -396,8 +397,29 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 		}
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
+	s.refreshAccountChannelCacheAfterSave(ctx, in.TenantId, in.TgAccountId)
 	s.refreshCollectSourceCache(ctx)
 	return nil
+}
+
+func (s *sSysPublish) refreshAccountChannelCacheAfterSave(ctx context.Context, tenantID, tgAccountID int64) {
+	if tenantID <= 0 || tgAccountID <= 0 {
+		return
+	}
+	taskID, err := collectorservice.AccountTasks().Submit(ctx, &collectorin.AccountTaskSubmit{
+		TenantID:    tenantID,
+		AccountID:   tgAccountID,
+		TaskType:    collectorin.AccountTaskTypeDialogCacheRefresh,
+		TaskKey:     fmt.Sprintf("channel-save-dialog-cache-refresh:%d:%d", tgAccountID, time.Now().UnixNano()),
+		Priority:    100,
+		MaxAttempts: 3,
+	})
+	if err != nil {
+		g.Log().Warningf(ctx, "频道配置保存后刷新账户频道缓存失败 tenantId:%d tgAccountId:%d err:%+v", tenantID, tgAccountID, err)
+		return
+	}
+	collectorservice.AccountRuntime().Refresh()
+	g.Log().Infof(ctx, "频道配置保存后已提交账户频道缓存刷新 tenantId:%d tgAccountId:%d taskId:%d", tenantID, tgAccountID, taskID)
 }
 
 const channelAccountAdminCacheTTL = 5 * time.Minute
