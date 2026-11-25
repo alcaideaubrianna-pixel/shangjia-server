@@ -13,7 +13,7 @@ import (
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
-	"golang.org/x/text/unicode/norm"
+	introfee "hotgo/addons/youban_publish/logic/introfee"
 )
 
 const collectFeeKeywordExpression = `(?:介绍费|介绍费用|推荐费|牵线费|居间费|对接费|感谢费|辛苦费|包含费|服务费|中介费|中介服务费|大米)`
@@ -804,27 +804,11 @@ func isCollectIntroFeeStandaloneSuffix(text string) bool {
 }
 
 func collectIntroFeeAmount(text string) string {
-	match := collectIntroFeeAmountRule.FindStringSubmatch(normalizeCollectKeywordText(text))
-	if len(match) < 2 {
-		match = collectIntroFeeLooseAmountRule.FindStringSubmatch(normalizeCollectKeywordText(text))
-	}
-	if len(match) < 2 {
-		return ""
-	}
-	return strings.Join(strings.Fields(strings.TrimSpace(match[1])), " ")
+	return introfee.Parse(text).Amount
 }
 
 func normalizeCollectKeywordText(text string) string {
-	text = norm.NFKC.String(text)
-	return strings.Map(func(r rune) rune {
-		if r >= '０' && r <= '９' {
-			return '0' + (r - '０')
-		}
-		if unicode.Is(unicode.Cf, r) || isCollectInvisibleVariationSelector(r) {
-			return -1
-		}
-		return r
-	}, text)
+	return introfee.Normalize(text)
 }
 
 func isCollectInvisibleVariationSelector(r rune) bool {
