@@ -65,6 +65,18 @@ api（HTTP契约） → controller（参数透传） → service（接口） →
 - **logic 层**：不出现 HTTP 相关代码，所有校验通过 `Filter()` 或 `g.Validator()` 完成
 - **dao 层**：`internal/dao/internal/` 由 CLI 自动生成，禁止手改
 
+### 数据库查询与写入规范
+
+- **所有业务 SQL 必须统一使用 GoFrame `gdb` Query Builder**，包括查询、更新、删除、统计、事务、子查询、`EXISTS`、条件更新和批量操作。
+- **禁止在业务代码中手写 SQL 字符串**，禁止通过 `fmt.Sprintf`、字符串拼接或模板方式拼接 `SELECT`、`WHERE`、`JOIN`、`ORDER BY`、`UPDATE` 等 SQL 片段。
+- 优先使用 `dao.XxxTable.Ctx(ctx)`、`g.DB().Model(...)`、`Where`、`WhereOr`、`WhereGroup`、`WhereIn`、`WhereExists`、`InnerJoin`、`LeftJoin`、`Fields`、`Order`、`Limit`、`Data`、`Update`、`Delete`、`Count`、`Scan` 等 Query Builder API。
+- 表名和列名优先使用生成的 DAO、`dao.XxxTable.Columns()` 或已有表常量；禁止在业务查询中散落硬编码列名。确需使用数据库表达式时，使用 GoFrame 的 `gdb.Raw` 或项目已有封装，并把表达式限制在最小范围。
+- 复杂条件必须拆成可读的 Builder 条件组；不得为了少写几行代码把整段条件压成手写 SQL。动态条件、状态集合和排序字段必须通过参数或受控枚举传入，不能直接拼接用户输入。
+- 事务必须使用 GoFrame 事务 API；条件更新必须在 `Where` 中明确租户、账户、主键或业务唯一键，避免无条件更新大表。
+- `gdb.Raw` 只允许用于 Query Builder 无法表达的单个数据库表达式、函数、排序或原子增量，禁止用它承载完整 SQL。新增使用前应在代码评审中说明原因。
+- 生产排障可以在 DBX、`psql` 或迁移脚本中执行只读 SQL；这不改变业务代码必须使用 Query Builder 的要求。DDL、索引和迁移脚本遵循部署手册，不得从 API、Worker 或启动流程中动态执行。
+- 新增或修改数据库查询后，必须至少执行 `gofmt`、`git diff --check`，并使用 DBX 或等价只读方式验证生成 SQL 的语法、参数和执行计划；禁止仅凭字符串拼接结果认为查询可用。
+
 ---
 
 ### 1. API 层 `api/admin/<module>/<module>.go`
