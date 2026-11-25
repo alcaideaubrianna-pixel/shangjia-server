@@ -206,12 +206,9 @@ func (s *sGateway) run(ctx context.Context) {
 }
 
 func (s *sGateway) Refresh(_ context.Context) error {
-	s.mu.Lock()
-	running := s.cancel != nil
-	s.mu.Unlock()
-	if !running {
-		return gerror.New("TG Bot Gateway Runtime未启动，请部署runtime角色")
-	}
+	// Plugins may request a refresh before Runtime starts, or on roles that
+	// do not host Runtime. Keep the notification buffered and non-blocking so
+	// plugin startup does not depend on role selection or module load order.
 	select {
 	case s.refresh <- struct{}{}:
 	default:
