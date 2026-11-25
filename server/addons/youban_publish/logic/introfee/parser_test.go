@@ -171,3 +171,20 @@ func TestStripAttachedSourceMark(t *testing.T) {
 		}
 	}
 }
+
+func TestComplexPriceDetection(t *testing.T) {
+	cases := []struct {
+		line    string
+		complex bool
+	}{
+		{"介绍费：打包 13888/单个 7888", true},
+		{"介绍费：一人7888 双人12888", true},
+		{"介绍费：国内7888，国外12888", false},
+		{"介绍费：7888 情诗J69", false},
+	}
+	for _, tc := range cases {
+		if got := IsComplexPriceLine(tc.line, ParseFields(tc.line)); got != tc.complex {
+			t.Fatalf("IsComplexPriceLine(%q) = %v, want %v", tc.line, got, tc.complex)
+		}
+	}
+}

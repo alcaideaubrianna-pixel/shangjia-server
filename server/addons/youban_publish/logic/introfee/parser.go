@@ -13,6 +13,7 @@ var (
 	amountPattern       = regexp.MustCompile(`(?:介绍费|介绍费用|推荐费|牵线费|居间费|对接费|感谢费|辛苦费|包含费|服务费|中介费|中介服务费|大米)[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
 	prefixAmountPattern = regexp.MustCompile(`([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)[\s\p{Zs}]*(?:介绍费|介绍费用|推荐费|牵线费|居间费|对接费|感谢费|辛苦费|包含费|服务费|中介费|中介服务费|大米)`)
 	numberPattern       = regexp.MustCompile(`[0-9０-９]+(?:[0-9０-９,，.]*)`)
+	multiPricePattern   = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
 )
 
 type Match struct {
@@ -51,6 +52,23 @@ func StripAttachedSourceMark(line string) string {
 		return line
 	}
 	return strings.TrimSpace(normalized[:amountIndex+len(fields.FirstAmount)])
+}
+
+func IsComplexPriceLine(text string, fields Fields) bool {
+	normalized := Normalize(text)
+	feeIndex := strings.Index(normalized, keywordPattern.FindString(normalized))
+	if feeIndex >= 0 {
+		normalized = normalized[feeIndex:]
+	}
+	numbers := numberPattern.FindAllString(normalized, -1)
+	if fields.ForeignAmount == "" && len(numbers) > 1 && multiPricePattern.MatchString(normalized) {
+		return true
+	}
+	return fields.ForeignAmount == "" && (strings.ContainsAny(normalized, ",，.") || multiPricePattern.MatchString(normalized))
+}
+
+func RemoveNumbers(text string) string {
+	return numberPattern.ReplaceAllString(text, "")
 }
 
 func IsFeeLine(text string) bool {

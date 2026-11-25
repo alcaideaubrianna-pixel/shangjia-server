@@ -23,8 +23,6 @@ var (
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:[A-Za-z]{1,5}[-_ ]?[0-9０-９]{2,10}|[\p{Han}]{1,8}[-_ ]?[A-Za-z0-9０-９]{2,8})(?:[^A-Za-z0-9０-９]|$)`)
 	collectFeeKeywordPattern         = regexp.MustCompile(collectFeeKeywordExpression)
-	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
-	collectMultiPricePattern         = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
 	collectCriticalProfileLineRules  = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:年龄|年齡|age)[^0-9０-９\n]{0,12}[0-9０-９]`),
 		regexp.MustCompile(`(?i)(?:身高|height)[^0-9０-９\n]{0,12}[0-9０-９]`),
@@ -522,8 +520,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		normalizedLine := normalizeCollectKeywordText(line)
 		feeKeyword := collectFeeKeywordPattern.FindString(normalizedLine)
 		feeIndex := strings.Index(normalizedLine, feeKeyword)
-		numbers := collectNumberRule.FindAllString(normalizedLine, -1)
-		complexAmount := len(numbers) > 1 && fields.ForeignAmount == "" && collectMultiPricePattern.MatchString(normalizedLine)
+		complexAmount := introfee.IsComplexPriceLine(normalizedLine, fields)
 		// A hyphen is commonly part of a trailing name/label (for example
 		// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
 		// explicit multi-price separators here; otherwise normalize to the first
@@ -535,7 +532,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		if feeIndex >= 0 {
 			feeTail = normalizedLine[feeIndex:]
 		}
-		complexFormat := fields.ForeignAmount == "" && (strings.ContainsAny(feeTail, ",，.") || collectMultiPricePattern.MatchString(feeTail))
+		complexFormat := introfee.IsComplexPriceLine(feeTail, fields)
 		if fields.FirstAmount == "" {
 			// Some forwards contain only a city/name after the fee label, often
 			// separated by zero-width characters ("介绍费：秦皇岛 Gus...").
@@ -560,7 +557,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 		if feeIndex > 0 && formatted != "" {
 			prefix := strings.TrimSpace(normalizedLine[:feeIndex])
 			// 前置金额已经进入格式化结果，只保留真正的前置正文，避免“7888介绍费”重复金额。
-			if strings.TrimSpace(collectNumberRule.ReplaceAllString(prefix, "")) != "" {
+			if strings.TrimSpace(introfee.RemoveNumbers(prefix)) != "" {
 				formatted = prefix + " " + formatted
 			}
 		}
