@@ -198,16 +198,20 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 		if err = s.refreshChannelCacheBeforeCheck(ctx, tenantId, in.TgAccountId); err != nil {
 			return nil, err
 		}
-		cache, cacheErr := s.tgChannelCacheByChannelId(ctx, tenantId, in.TgAccountId, in.TargetChatId)
-		if cacheErr != nil {
-			return nil, cacheErr
-		}
-		res.CanAddAdmin = cache.CanAddAdmins
-		res.CanAddBot = cache.CanInviteUsers
-		res.CanInviteUsers = cache.CanInviteUsers
-		res.ChannelTitle = cache.ChannelTitle
-		res.ChannelUsername = strings.TrimPrefix(cache.ChannelUsername, "@")
-		res.TargetChatId = cache.ChannelId
+	}
+	// Channel identity is required even when the Bot already has permissions.
+	// Saving the check result must never erase metadata on that fast path.
+	cache, cacheErr := s.tgChannelCacheByChannelId(ctx, tenantId, in.TgAccountId, in.TargetChatId)
+	if cacheErr != nil {
+		return nil, cacheErr
+	}
+	res.CanAddAdmin = cache.CanAddAdmins
+	res.CanAddBot = cache.CanInviteUsers
+	res.CanInviteUsers = cache.CanInviteUsers
+	res.ChannelTitle = cache.ChannelTitle
+	res.ChannelUsername = strings.TrimPrefix(cache.ChannelUsername, "@")
+	res.TargetChatId = normalizeTelegramChannelChatID(cache.ChannelId)
+	if needAttach {
 		if cache.CanAddAdmins != 1 {
 			res.Allowed = 0
 			res.Message = "Bot 未加入频道或无发送权限，且当前 TG 账号没有添加管理员权限，无法添加 Bot"
