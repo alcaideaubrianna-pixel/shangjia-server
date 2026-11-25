@@ -162,7 +162,7 @@ func normalizeCollectTextInOrder(rawText string, rule gdb.Record, mediaCount int
 	truncateIntroFee := rule["truncate_intro_fee_enabled"].Bool()
 	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
 	for _, line := range lines {
-		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if !introfee.IsFeeLine(line) {
 			body = append(body, line)
 			continue
 		}
@@ -196,7 +196,7 @@ func normalizeCollectTextInOrder(rawText string, rule gdb.Record, mediaCount int
 // Fee lines and explicit profile numbers are content, not source title codes.
 func isCollectLeadingMaterialTitle(line string) bool {
 	normalized := normalizeCollectKeywordText(line)
-	if collectFeeKeywordPattern.MatchString(normalized) || strings.HasPrefix(strings.TrimSpace(line), "编号") {
+	if introfee.IsFeeLine(normalized) || strings.HasPrefix(strings.TrimSpace(line), "编号") {
 		return false
 	}
 	return collectMaterialMetaLineRule.MatchString(line) || collectMaterialCodeLineRule.MatchString(line) || isCollectMaterialAlphaNumericCode(line)
@@ -222,7 +222,7 @@ func applyCollectFeeScopedRules(text string, rule gdb.Record, truncate bool) str
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	allowed := make([]bool, len(lines))
 	for index, line := range lines {
-		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if !introfee.IsFeeLine(line) {
 			continue
 		}
 		for candidate := index - 1; candidate <= index+1; candidate++ {
@@ -276,7 +276,7 @@ func preserveCollectNonFeeLinesWithFilter(original, processed string, shouldRest
 		}
 	}
 	for index, line := range originalLines {
-		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if introfee.IsFeeLine(line) {
 			for candidate := index - 1; candidate <= index+1; candidate++ {
 				if candidate >= 0 && candidate < len(protected) {
 					protected[candidate] = false
@@ -308,7 +308,7 @@ func preserveCollectNonFeeLinesWithFilter(original, processed string, shouldRest
 	}
 	insertAt := len(processedLines)
 	for index, line := range processedLines {
-		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if introfee.IsFeeLine(line) {
 			insertAt = index
 			break
 		}
@@ -431,7 +431,7 @@ func applyCollectIntroFeeTruncateAt(text string, lineOffset int) string {
 	for index, line := range lines {
 		// Match against a normalized copy only; preserve the original text,
 		// emoji, spacing, and formatting in all retained lines.
-		if collectIntroFeeAmount(line) != "" || collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if collectIntroFeeAmount(line) != "" || introfee.IsFeeLine(line) {
 			cutoff = index
 			if previous := previousCollectContentLine(lines, index); previous >= 0 && collectShortTitleLine(lines[previous]) {
 				cutoff = previous
@@ -547,7 +547,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for index, line := range lines {
-		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+		if !introfee.IsFeeLine(line) {
 			continue
 		}
 		line = stripCollectIntroFeeAttachedSourceMark(line)
@@ -604,7 +604,7 @@ func applyCollectIntroFeeSuffix(text, original, suffix string) string {
 	// Normalize every fee row before removing short standalone labels between
 	// rows, so a second fee row cannot retain an old source suffix.
 	for index := 0; index < len(lines); index++ {
-		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(lines[index])) {
+		if !introfee.IsFeeLine(lines[index]) {
 			continue
 		}
 		if index > 0 && isCollectIntroFeeShortNeighbour(lines[index-1]) {
@@ -652,7 +652,7 @@ func isCollectIntroFeeShortNeighbour(line string) bool {
 
 func isCollectIntroFeeStandaloneSuffix(text string) bool {
 	text = strings.TrimSpace(text)
-	if !collectIntroFeeStandaloneSuffix.MatchString(text) {
+	if !introfee.IsStandaloneSuffix(text) {
 		return false
 	}
 	for _, r := range text {

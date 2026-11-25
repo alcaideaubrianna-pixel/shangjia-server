@@ -29,6 +29,30 @@ type Fields struct {
 	ForeignAmount string
 }
 
+func IsFeeLine(text string) bool {
+	return keywordPattern.MatchString(Normalize(text))
+}
+
+func Keyword(text string) string {
+	if keywordPattern.FindString(Normalize(text)) == "" {
+		return ""
+	}
+	return "介绍费"
+}
+
+func IsStandaloneSuffix(text string) bool {
+	text = strings.TrimSpace(Normalize(text))
+	if text == "" || len([]rune(text)) > 32 {
+		return false
+	}
+	for _, r := range text {
+		if !(unicode.Is(unicode.Han, r) || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return true
+}
+
 type Policy struct {
 	RemoveTail bool
 	Suffix     string
