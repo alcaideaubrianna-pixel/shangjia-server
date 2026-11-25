@@ -120,7 +120,7 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 			"tenant_id":               account.TenantId,
 			"account_id":              account.Id,
 			"source_type":             in.SourceType,
-			"title":                   in.Title,
+			"title":                   normalizeCollectSourceTitle(in.Title, in.SourceUsername, in.SourceChatId),
 			"source_chat_id":          in.SourceChatId,
 			"source_username":         in.SourceUsername,
 			"tg_account_id":           in.TgAccountId,
@@ -167,6 +167,22 @@ func (s *sSysPublish) CollectSourceSave(ctx context.Context, in *sysin.CollectSo
 		s.refreshAccountCollectSupervisor()
 	}
 	return id, err
+}
+
+// normalizeCollectSourceTitle removes an accidentally duplicated channel
+// identity suffix while preserving the user-visible channel title.
+func normalizeCollectSourceTitle(title, username, chatID string) string {
+	title = strings.TrimSpace(title)
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	chatID = strings.TrimSpace(chatID)
+	if username == "" || chatID == "" {
+		return title
+	}
+	suffix := "@" + username + "（" + chatID + "）"
+	for strings.Contains(title, " "+suffix+" "+suffix) {
+		title = strings.ReplaceAll(title, " "+suffix+" "+suffix, " "+suffix)
+	}
+	return strings.TrimSpace(title)
 }
 
 func lockOwnedCollectSource(ctx context.Context, tx gdb.TX, id, tenantID, accountID int64) (*sysin.CollectSourceModel, error) {
@@ -426,6 +442,7 @@ func (s *sSysPublish) fillCollectSourceChannelTitles(ctx context.Context, list [
 				item.SourceUsername = cache.Username
 			}
 		}
+		item.Title = normalizeCollectSourceTitle(item.Title, item.SourceUsername, item.SourceChatId)
 	}
 	return nil
 }

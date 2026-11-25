@@ -78,6 +78,24 @@ func (s *sSysPublish) enqueueCollectEventMediaWithRecovery(ctx context.Context, 
 }
 
 func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEventListInp) (list []*sysin.CollectEventModel, totalCount int, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			g.Log().Error(ctx, "读取采集事件列表发生panic", g.Map{
+				"sourceId": func() int64 {
+					if in == nil {
+						return 0
+					}
+					return in.SourceId
+				}(),
+				"stage":      "collect_event_list",
+				"panic":      fmt.Sprintf("%v", recovered),
+				"eventCount": len(list),
+			})
+			list = nil
+			totalCount = 0
+			err = gerror.New("读取采集事件列表失败，请稍后重试")
+		}
+	}()
 	account, err := s.currentAccount(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -102,17 +120,21 @@ func (s *sSysPublish) CollectEventList(ctx context.Context, in *sysin.CollectEve
 	if totalCount, err = mod.Count(); err != nil {
 		return nil, 0, gerror.Wrap(err, "统计采集事件失败")
 	}
+	g.Log().Info(ctx, "读取采集事件列表基础数据完成", g.Map{"sourceId": in.SourceId, "total": totalCount, "pageSize": in.PerPage})
 	fields := "e.*,s.title AS source_title"
 	if err = mod.Fields(fields).Page(in.Page, in.PerPage).OrderDesc("e.id").Scan(&list); err != nil {
 		return nil, 0, gerror.Wrap(err, "获取采集事件失败")
 	}
 	if err = s.fillCollectEventRouting(ctx, list, account.TenantId, account.Id); err != nil {
+		g.Log().Error(ctx, "读取采集事件分发信息失败", g.Map{"sourceId": in.SourceId, "eventCount": len(list), "error": err.Error()})
 		return nil, 0, err
 	}
 	if err = s.fillCollectEventMediaCache(ctx, list); err != nil {
+		g.Log().Error(ctx, "读取采集事件媒体缓存失败", g.Map{"sourceId": in.SourceId, "eventCount": len(list), "error": err.Error()})
 		return nil, 0, err
 	}
 	if err = s.fillCollectEventProgress(ctx, list); err != nil {
+		g.Log().Error(ctx, "读取采集事件处理进度失败", g.Map{"sourceId": in.SourceId, "eventCount": len(list), "error": err.Error()})
 		return nil, 0, gerror.Wrap(err, "读取采集处理阶段失败")
 	}
 	for _, item := range list {
