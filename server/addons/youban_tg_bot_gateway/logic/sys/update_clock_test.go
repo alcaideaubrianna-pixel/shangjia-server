@@ -10,7 +10,7 @@ import (
 
 func TestGatewayUpdateClockUsesExistingProducerEpoch(t *testing.T) {
 	received := time.Unix(1800000000, 123456789)
-	ctx := gatewayUpdateClock(context.Background(), received.UnixNano(), received.Add(24*time.Hour))
+	ctx := gatewayUpdateClock(context.Background(), received.UnixNano(), "webhook_received", received.Add(24*time.Hour))
 	meta := collectobserve.From(ctx)
 	if !meta.ReceivedAt.Equal(received) || meta.TimeBasis != "gateway_ingress" || meta.Mode != "realtime" {
 		t.Fatalf("gateway enqueue clock lost: %+v", meta)
@@ -33,7 +33,7 @@ func TestGatewayUpdateClockRejectsMissingAndFutureEpoch(t *testing.T) {
 	now := time.Unix(1800000000, 0)
 	stale := collectobserve.With(context.Background(), collectobserve.Metadata{ReceivedAt: now.Add(-time.Hour)})
 	for _, epoch := range []int64{0, -1, now.Add(time.Second).UnixNano()} {
-		got := collectobserve.From(gatewayUpdateClock(stale, epoch, now))
+		got := collectobserve.From(gatewayUpdateClock(stale, epoch, "gateway_ingress", now))
 		if !got.ReceivedAt.IsZero() || got.TimeBasis != "" {
 			t.Fatalf("invalid enqueue epoch inherited a clock: %+v", got)
 		}

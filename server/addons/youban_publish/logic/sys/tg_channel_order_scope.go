@@ -130,7 +130,7 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 		// the same profile can block it.
 		model = model.Where(
 			"(j.status IN ('sending','confirming','unknown','reconciling') OR "+
-				"(j.profile_id=? AND ("+telegramChannelPendingCleanupSQL("j")+" OR "+
+				"(j.profile_id=? AND j.status NOT IN ('sent','failed','superseded') AND ("+telegramChannelPendingCleanupSQL("j")+" OR "+
 				"j.send_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming'))))",
 			job.ProfileId,
 		)

@@ -33,6 +33,7 @@ type gatewayUpdatePayload struct {
 	Key        string `json:"key"`
 	Body       []byte `json:"body"`
 	EnqueuedAt int64  `json:"enqueuedAt,omitempty"`
+	TimeBasis  string `json:"timeBasis,omitempty"`
 }
 
 const gatewayUpdateDedupTTL = 24 * time.Hour
@@ -188,7 +189,13 @@ func (s *sGateway) enqueueUpdateBody(ctx context.Context, key string, body []byt
 	if clockAt.IsZero() || clockAt.After(enqueuedAt) || clockAt.UnixNano() <= 0 {
 		clockAt = enqueuedAt
 	}
-	payload, err := json.Marshal(gatewayUpdatePayload{Key: key, Body: body, EnqueuedAt: clockAt.UnixNano()})
+	timeBasis := collectobserve.From(ctx).TimeBasis
+	if timeBasis != "webhook_received" {
+		timeBasis = "gateway_ingress"
+	}
+	payload, err := json.Marshal(gatewayUpdatePayload{
+		Key: key, Body: body, EnqueuedAt: clockAt.UnixNano(), TimeBasis: timeBasis,
+	})
 	if err != nil {
 		return fmt.Errorf("序列化Telegram队列任务失败: %w", err)
 	}
@@ -284,7 +291,7 @@ func (s *sGateway) handleUpdateTask(ctx context.Context, task *asynq.Task) error
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("解析Telegram队列任务失败: %w", err)
 	}
-	ctx = gatewayUpdateClock(ctx, payload.EnqueuedAt, startedAt)
+	ctx = gatewayUpdateClock(ctx, payload.EnqueuedAt, payload.TimeBasis, startedAt)
 	var update models.Update
 	if err := json.Unmarshal(payload.Body, &update); err != nil {
 		return fmt.Errorf("解析Telegram更新失败: %w", err)
