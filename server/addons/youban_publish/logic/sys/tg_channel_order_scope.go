@@ -150,6 +150,21 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 	}
 	row, err := model.Fields("j.id,j.status,j.send_phase,j.timeout_cleanup_at").Limit(1).One()
 	if err != nil {
+		g.Log().Error(ctx, "频道发送闸门查询失败", g.Map{
+			"event":        "channel_order_gate_query_failed",
+			"jobId":        job.Id,
+			"profileId":    job.ProfileId,
+			"channelId":    job.ChannelId,
+			"targetChatId": job.TargetChatId,
+			"tenantId":     job.TenantId,
+			"accountId":    job.AccountId,
+			"status":       job.Status,
+			"sendPhase":    job.SendPhase,
+			"queueName":    job.QueueName,
+			"priority":     telegramJobPriorityValue(job),
+			"error":        err.Error(),
+			"scope":        scope,
+		})
 		return false, err
 	}
 	if !row.IsEmpty() {
