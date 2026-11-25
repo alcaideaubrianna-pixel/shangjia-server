@@ -206,6 +206,12 @@ func (s *sGateway) run(ctx context.Context) {
 }
 
 func (s *sGateway) Refresh(_ context.Context) error {
+	s.mu.Lock()
+	running := s.cancel != nil
+	s.mu.Unlock()
+	if !running {
+		return gerror.New("TG Bot Gateway Runtime未启动，请部署runtime角色")
+	}
 	select {
 	case s.refresh <- struct{}{}:
 	default:

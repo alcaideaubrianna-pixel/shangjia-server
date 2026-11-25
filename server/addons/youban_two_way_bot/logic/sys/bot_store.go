@@ -30,5 +30,30 @@ func scanPublishTwoWayBot(ctx context.Context, id, tenantID int64) (*twowaymodel
 		Where("tenant_id", tenantID).
 		WhereNull("deleted_at").
 		Scan(&row)
+	if err != nil || row != nil && row.Id > 0 {
+		return row, err
+	}
+	// Cooperation configurations created before the publish_bot migration
+	// stored IDs from hg_youban_two_way_bot_bot. Resolve that legacy reference
+	// to the sole current active publish bot owned by the same tenant/account.
+	var legacy struct {
+		TenantID  int64 `orm:"tenant_id"`
+		AccountID int64 `orm:"account_id"`
+	}
+	if legacyErr := g.DB().Model("hg_youban_two_way_bot_bot").Safe().Ctx(ctx).
+		Fields("tenant_id,account_id").Where("id", id).Where("tenant_id", tenantID).
+		WhereNull("deleted_at").Scan(&legacy); legacyErr != nil || legacy.AccountID <= 0 {
+		return row, err
+	}
+	var candidates []*twowaymodel.BotRuntime
+	if legacyErr := publishTwoWayBots(ctx).
+		Where("tenant_id", legacy.TenantID).
+		Where("account_id", legacy.AccountID).
+		Where("status", 1).WhereNull("deleted_at").Scan(&candidates); legacyErr != nil {
+		return nil, legacyErr
+	}
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
 	return row, err
 }
