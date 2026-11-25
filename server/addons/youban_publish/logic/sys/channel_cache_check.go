@@ -68,7 +68,7 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	}
 	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancelPersist()
-	if err = s.persistChannelBotPermission(persistCtx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.BotResults); err != nil {
+	if err = s.persistChannelBotPermission(persistCtx, account.TenantId, in.ChannelId, in.TgAccountId, res.TargetChatId, res.ChannelTitle, res.ChannelUsername, res.BotResults); err != nil {
 		return nil, gerror.Wrap(err, "保存频道 Bot 权限检测结果失败")
 	}
 	logChannelCheckStage(ctx, "persist_completed", in.TgAccountId, res.TargetChatId, 0, startedAt, nil)
@@ -202,10 +202,10 @@ func (s *sSysPublish) checkAdminChannelBots(ctx context.Context, in *sysin.Chann
 		}
 		res.BotResults = append(res.BotResults, result)
 	}
-	if needAttach {
-		if err = s.refreshChannelCacheBeforeCheck(ctx, tenantId, in.TgAccountId); err != nil {
-			return nil, err
-		}
+	// Always refresh the account dialog cache before reading identity. A successful
+	// Bot permission check must also reflect the latest Telegram title and username.
+	if err = s.refreshChannelCacheBeforeCheck(ctx, tenantId, in.TgAccountId); err != nil {
+		return nil, err
 	}
 	// Channel identity is required even when the Bot already has permissions.
 	// Saving the check result must never erase metadata on that fast path.

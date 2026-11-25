@@ -152,16 +152,21 @@ func (s *sSysPublish) persistChannelBotPermissionState(ctx context.Context, tena
 	return err
 }
 
-func (s *sSysPublish) persistChannelBotPermission(ctx context.Context, tenantId, channelId, tgAccountId int64, targetChatId string, results []*sysin.ChannelCheckBotModel) error {
+func (s *sSysPublish) persistChannelBotPermission(ctx context.Context, tenantId, channelId, tgAccountId int64, targetChatId, channelTitle, channelUsername string, results []*sysin.ChannelCheckBotModel) error {
+	data := g.Map{"bot_permission_status_json": encodeChannelBotPermissionStates(results)}
+	if strings.TrimSpace(channelTitle) != "" {
+		data["channel_title"] = strings.TrimSpace(channelTitle)
+	}
+	if strings.TrimSpace(channelUsername) != "" {
+		data["channel_username"] = strings.TrimPrefix(strings.TrimSpace(channelUsername), "@")
+	}
 	if channelId > 0 {
 		_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
 			Where("id", channelId).
 			Where("tenant_id", tenantId).
 			Where("tg_account_id", tgAccountId).
 			WhereNull("deleted_at").
-			Data(g.Map{
-				"bot_permission_status_json": encodeChannelBotPermissionStates(results),
-			}).Update()
+			Data(data).Update()
 		return err
 	}
 	var channel struct {
@@ -198,5 +203,11 @@ func (s *sSysPublish) persistChannelBotPermission(ctx context.Context, tenantId,
 	if channel.Id <= 0 {
 		return nil
 	}
-	return s.persistChannelBotPermissionState(ctx, tenantId, channel.Id, results)
+	_, err := g.DB().Model(publishChannelTable).Safe().Ctx(ctx).
+		Where("id", channel.Id).
+		Where("tenant_id", tenantId).
+		Where("tg_account_id", tgAccountId).
+		WhereNull("deleted_at").
+		Data(data).Update()
+	return err
 }
