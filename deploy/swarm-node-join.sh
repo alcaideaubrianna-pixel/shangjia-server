@@ -70,7 +70,7 @@ if command -v tccli >/dev/null 2>&1 && [[ "$node_ip" =~ ^[0-9]+(\.[0-9]+){3}$ ]]
     ]' >/dev/null
 fi
 
-if [[ "${SWARM_AUTO_LOGGING:-true}" == true ]] && [[ -x "$(dirname "$0")/cls-loglistener-install.sh" ]]; then
+if [[ "${SWARM_AUTO_LOGGING:-false}" == true ]] && [[ -x "$(dirname "$0")/cls-loglistener-install.sh" ]]; then
   "$(dirname "$0")/cls-loglistener-install.sh" "$node_ip"
 fi
 echo "节点已加入 Swarm：$node_name role=$ROLE"
