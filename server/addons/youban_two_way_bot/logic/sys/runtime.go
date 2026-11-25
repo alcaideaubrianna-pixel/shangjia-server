@@ -69,26 +69,54 @@ func (s *sSysTwoWayBot) updateWebhookStatus(ctx context.Context, id int64, statu
 
 func (s *sSysTwoWayBot) enabledBots(ctx context.Context) ([]*twowaymodel.BotRuntime, error) {
 	var rows []*twowaymodel.BotRuntime
-	err := publishTwoWayBots(ctx).
+	if err := publishTwoWayBots(ctx).
 		Where("status", sysin.TwoWayBotStatusEnabled).
 		WhereNull("deleted_at").
-		Scan(&rows)
-	if err != nil {
+		OrderAsc("id").Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "读取双向机器人失败")
+	}
+	seenTokens := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		seenTokens[strings.TrimSpace(row.BotToken)] = struct{}{}
+	}
+	legacyRows, err := legacyEnabledTwoWayBots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range legacyRows {
+		token := strings.TrimSpace(row.BotToken)
+		if token == "" {
+			continue
+		}
+		if _, exists := seenTokens[token]; exists {
+			continue
+		}
+		seenTokens[token] = struct{}{}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }
 
 func (s *sSysTwoWayBot) botByToken(ctx context.Context, token string) (*twowaymodel.BotRuntime, error) {
+	token = strings.TrimSpace(token)
 	var row *twowaymodel.BotRuntime
 	err := publishTwoWayBots(ctx).
-		Where("bot_token", strings.TrimSpace(token)).
+		Where("bot_token", token).
 		Where("status", sysin.TwoWayBotStatusEnabled).
 		WhereNull("deleted_at").
-		OrderDesc("id").
-		Scan(&row)
+		OrderDesc("id").Scan(&row)
 	if err != nil {
 		return nil, gerror.Wrap(err, "读取双向机器人失败")
 	}
-	return row, nil
+	if row != nil && row.Id > 0 {
+		return row, nil
+	}
+	var legacy *twowaymodel.BotRuntime
+	if err := g.DB().Model("hg_youban_two_way_bot_bot").Safe().Ctx(ctx).
+		Fields(legacyTwoWayBotFields).Where("bot_token", token).
+		Where("status", sysin.TwoWayBotStatusEnabled).WhereNull("deleted_at").
+		OrderDesc("id").Scan(&legacy); err != nil {
+		return nil, gerror.Wrap(err, "读取历史双向机器人失败")
+	}
+	return legacy, nil
 }
