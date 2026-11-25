@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
+	introfee "hotgo/addons/youban_publish/logic/introfee"
 
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
@@ -228,7 +229,22 @@ func (s *sSysPublish) normalizeCollectMaterialText(ctx context.Context, event gd
 	if rawText == "" {
 		rawText = authoritativeCollectRawText(text)
 	}
-	return normalizeCollectTextInOrder(rawText, rule, event["media_count"].Int())
+	result := normalizeCollectTextInOrder(rawText, rule, event["media_count"].Int())
+	if introfee.IsFeeLine(rawText) || strings.TrimSpace(rule["intro_fee_suffix"].String()) != "" || rule["truncate_intro_fee_enabled"].Bool() {
+		g.Log().Info(ctx, "介绍费规则处理结果", g.Map{
+			"event":           "collect.intro_fee.processed",
+			"eventId":         event["id"].Int64(),
+			"ruleId":          rule["id"].Int64(),
+			"sourceId":        rule["source_id"].Int64(),
+			"rawLength":       len([]rune(rawText)),
+			"resultLength":    len([]rune(result)),
+			"changed":         rawText != result,
+			"suffixEnabled":   strings.TrimSpace(rule["intro_fee_suffix"].String()) != "",
+			"truncateEnabled": rule["truncate_intro_fee_enabled"].Bool(),
+			"resultEmpty":     strings.TrimSpace(result) == "",
+		})
+	}
+	return result
 }
 
 func (s *sSysPublish) prepareCollectMaterial(ctx context.Context, event gdb.Record, content *collectContentResult) (*collectPreparedMaterial, error) {
