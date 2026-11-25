@@ -155,6 +155,28 @@ func ProcessSuffix(text, suffix string, limit int, protected func(string) bool) 
 	return strings.Join(lines, "\n")
 }
 
+func TruncateAtFee(text string) string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	for index, line := range lines {
+		if !IsFeeLine(line) {
+			continue
+		}
+		cutoff := index
+		for previous := index - 1; previous >= 0; previous-- {
+			if strings.TrimSpace(Normalize(lines[previous])) == "" {
+				continue
+			}
+			if IsShortTitle(lines[previous]) {
+				cutoff = previous
+			}
+			break
+		}
+		return strings.TrimSpace(strings.Join(lines[:cutoff], "\n"))
+	}
+	return text
+}
+
 func IsFeeLine(text string) bool {
 	return keywordPattern.MatchString(Normalize(text))
 }

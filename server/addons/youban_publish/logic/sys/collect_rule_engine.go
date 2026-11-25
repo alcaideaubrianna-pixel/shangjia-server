@@ -396,23 +396,9 @@ func applyCollectIntroFeeTruncate(text string) string {
 }
 
 func applyCollectIntroFeeTruncateAt(text string, lineOffset int) string {
-	normalized := strings.ReplaceAll(text, "\r\n", "\n")
-	lines := strings.Split(normalized, "\n")
-	changed := false
-	cutoff := len(lines)
-	for index, line := range lines {
-		// Match against a normalized copy only; preserve the original text,
-		// emoji, spacing, and formatting in all retained lines.
-		if collectIntroFeeAmount(line) != "" || introfee.IsFeeLine(line) {
-			cutoff = index
-			if previous := previousCollectContentLine(lines, index); previous >= 0 && collectShortTitleLine(lines[previous]) {
-				cutoff = previous
-			}
-			changed = true
-			break
-		}
-	}
-	lines = lines[:cutoff]
+	feeText := introfee.TruncateAtFee(text)
+	changed := feeText != text
+	lines := strings.Split(strings.ReplaceAll(feeText, "\r\n", "\n"), "\n")
 	start := 0
 	firstContentLine := true
 	for start < len(lines) {
@@ -438,19 +424,6 @@ func applyCollectIntroFeeTruncateAt(text string, lineOffset int) string {
 		return strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return text
-}
-
-func previousCollectContentLine(lines []string, before int) int {
-	for index := before - 1; index >= 0; index-- {
-		if strings.TrimSpace(normalizeCollectKeywordText(lines[index])) != "" {
-			return index
-		}
-	}
-	return -1
-}
-
-func collectShortTitleLine(line string) bool {
-	return introfee.IsShortTitle(line)
 }
 
 func isCollectMaterialAlphaNumericCode(line string) bool {
@@ -512,10 +485,6 @@ func isCollectIntroFeeStandaloneSuffix(text string) bool {
 		}
 	}
 	return false
-}
-
-func collectIntroFeeAmount(text string) string {
-	return introfee.Parse(text).Amount
 }
 
 func normalizeCollectKeywordText(text string) string {
