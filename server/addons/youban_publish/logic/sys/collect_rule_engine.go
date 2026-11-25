@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -49,19 +48,10 @@ type collectRuleDecision struct {
 	MatchJSON string
 }
 
-type collectIntroFeeFields struct {
-	FirstAmount   string
-	FirstSuffix   string
-	ForeignAmount string
-}
+type collectIntroFeeFields = introfee.Fields
 
 func parseCollectIntroFeeFields(text string) collectIntroFeeFields {
-	parsed := introfee.ParseFields(text)
-	return collectIntroFeeFields{
-		FirstAmount:   parsed.FirstAmount,
-		FirstSuffix:   parsed.FirstSuffix,
-		ForeignAmount: parsed.ForeignAmount,
-	}
+	return introfee.ParseFields(text)
 }
 
 // authoritativeCollectRawText removes an already-processed copy that can be
@@ -89,14 +79,7 @@ func authoritativeCollectRawText(text string) string {
 }
 
 func formatCollectIntroFeeFields(fields collectIntroFeeFields, suffix string) string {
-	suffix = strings.TrimSpace(suffix)
-	if fields.FirstAmount == "" {
-		return ""
-	}
-	if fields.ForeignAmount != "" {
-		return strings.TrimSpace(fmt.Sprintf("介绍费 %s 国外 %s %s", fields.FirstAmount, fields.ForeignAmount, suffix))
-	}
-	return strings.TrimSpace(fmt.Sprintf("介绍费 %s %s", fields.FirstAmount, suffix))
+	return introfee.FormatFields(fields, suffix)
 }
 
 type collectReplaceRule struct {

@@ -29,6 +29,17 @@ type Fields struct {
 	ForeignAmount string
 }
 
+func FormatFields(fields Fields, suffix string) string {
+	suffix = strings.TrimSpace(suffix)
+	if fields.FirstAmount == "" {
+		return ""
+	}
+	if fields.ForeignAmount != "" {
+		return strings.TrimSpace("介绍费 " + fields.FirstAmount + " 国外 " + fields.ForeignAmount + " " + suffix)
+	}
+	return strings.TrimSpace("介绍费 " + fields.FirstAmount + " " + suffix)
+}
+
 func IsFeeLine(text string) bool {
 	return keywordPattern.MatchString(Normalize(text))
 }
