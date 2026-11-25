@@ -16,6 +16,7 @@ import (
 	"github.com/gotd/td/telegram"
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -398,6 +399,9 @@ func (s *sSysPublish) AdminChannelSave(ctx context.Context, in *sysin.ChannelSav
 	}
 	s.refreshAutoDeleteChannelCache(ctx)
 	s.refreshAccountChannelCacheAfterSave(ctx, in.TenantId, in.TgAccountId)
+	if refreshErr := gatewayservice.Gateway().Refresh(ctx); refreshErr != nil {
+		g.Log().Warningf(ctx, "频道配置保存后刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	s.refreshCollectSourceCache(ctx)
 	return nil
 }
