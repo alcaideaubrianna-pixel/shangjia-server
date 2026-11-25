@@ -122,9 +122,22 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 	defer cancel()
 	scope, args := telegramChannelOrderScopeSQL("j", job)
 	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
-		Where("j.id <> ?", job.Id).Where(scope, args...).
-		Where(telegramChannelStartedJobSQL("j")).
-		Where("(j.status NOT IN ('sent','failed','superseded') OR (j.profile_id > 0 AND j.profile_id = ?))", job.ProfileId)
+		Where("j.id <> ?", job.Id).Where(scope, args...)
+	if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
+		// Manual, AI and bot publishing is already admitted to the foreground
+		// Redis lane. Historical/cycle pending work must not turn that lane into
+		// a channel-wide wait queue; only a real in-flight send or cleanup for
+		// the same profile can block it.
+		model = model.Where(
+			"(j.status IN ('sending','confirming','unknown','reconciling') OR "+
+				"(j.profile_id=? AND ("+telegramChannelPendingCleanupSQL("j")+" OR "+
+				"j.send_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming'))))",
+			job.ProfileId,
+		)
+	} else {
+		model = model.Where(telegramChannelStartedJobSQL("j")).
+			Where("(j.status NOT IN ('sent','failed','superseded') OR (j.profile_id > 0 AND j.profile_id = ?))", job.ProfileId)
+	}
 	if telegramChannelJobOwnsOrder(job) {
 		model = model.Where("("+telegramChannelPendingCleanupSQL("j")+" OR j.id < ?)", job.Id)
 	}
