@@ -1,7 +1,7 @@
 {
   "annotations": [],
   "cursorSync": "Off",
-  "description": "采集产出、全链路阶段性能、稳定性与数据可信度。",
+  "description": "采集全链路运行监控。已按当前 VictoriaMetrics 埋点名称校正查询；无数据仅表示该阶段当前没有对应事件。",
   "editable": true,
   "elements": {
     "batch_reuse": {
@@ -4000,5 +4000,6 @@
         "sort": "disabled"
       }
     }
-  ]
+  ],
+  "version": 12
 }
