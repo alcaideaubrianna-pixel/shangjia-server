@@ -27,7 +27,7 @@ kill_tree() {
 
 cleanup_children() {
   local pid
-  for pid in "${CHILD_PIDS[@]}"; do
+  for pid in "${CHILD_PIDS[@]-}"; do
     kill_tree "$pid"
   done
   CHILD_PIDS=()
@@ -51,7 +51,12 @@ TAG="${1:-}"
 if [[ "$TAG" == "-h" || "$TAG" == "--help" || -z "$TAG" ]]; then
   cat <<'HELP'
 用法：
-  deploy/tencent-deploy-all.sh <image-tag> [-f|--force] [角色 ...]
+  deploy/tencent-deploy-all.sh -h | --help
+  deploy/tencent-deploy-all.sh <image-tag> [-f|--force] [--all | 角色 ...]
+
+  -h, --help   显示帮助并退出
+  -f, --force  即使镜像 digest 相同也重新部署
+  --all        部署全部角色，包括 account
 
 默认角色：publish collector scheduler background media web
 account 可作为显式角色部署，始终保持单副本并使用 stop-first，避免两个账号运行时同时在线
@@ -68,14 +73,19 @@ fi
 shift
 
 FORCE=false
+ALL_ROLES=false
 ROLE_ARGS=()
 for arg in "$@"; do
-  if [[ "$arg" == "-f" || "$arg" == "--force" ]]; then
-    FORCE=true
-  else
-    ROLE_ARGS+=("$arg")
-  fi
+  case "$arg" in
+    -f|--force) FORCE=true ;;
+    --all) ALL_ROLES=true ;;
+    *) ROLE_ARGS+=("$arg") ;;
+  esac
 done
+if [[ "$ALL_ROLES" == true ]] && (( ${#ROLE_ARGS[@]} > 0 )); then
+  echo "--all 不能与显式角色同时使用" >&2
+  exit 2
+fi
 
 MANAGER_SSH_TARGET="${SWARM_MANAGER_SSH_TARGET:-ubuntu@43.160.212.235}"
 MANAGER_SSH_KEY="${SWARM_MANAGER_SSH_KEY:-/Users/ley/.ssh/id_hk_rsa}"
@@ -84,6 +94,7 @@ WEB_NODE_URL="${SWARM_WEB_NODE_URL:-http://43.160.221.143}"
 WEB_EXTERNAL_READY_URL="${SWARM_WEB_EXTERNAL_READY_URL:-https://api.xiaohuiji.cc/readyz}"
 LOG_DRIVER_ARGS="--log-driver json-file --log-opt max-size=100m --log-opt max-file=3"
 ROLES=(publish collector scheduler background media web)
+if [[ "$ALL_ROLES" == true ]]; then ROLES+=(account); fi
 if (( ${#ROLE_ARGS[@]} > 0 )); then ROLES=("${ROLE_ARGS[@]}"); fi
 
 for role in "${ROLES[@]}"; do
@@ -160,7 +171,7 @@ update_worker() {
   fi
   logf '%s[%s] 开始部署%s\n' "$C_YELLOW" "$role" "$C_RESET"
   desired=$(remote "sudo docker service inspect '$service' --format '{{if .Spec.Mode.Replicated}}{{.Spec.Mode.Replicated.Replicas}}{{else}}1{{end}}'")
-  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth $LOG_DRIVER_ARGS --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism 1 '$service' >/dev/null"
+  remote "LANG=C LC_ALL=C sudo docker service update --detach=true --with-registry-auth $LOG_DRIVER_ARGS --image '$IMAGE' --env-add APP_REVISION='$TAG' --update-order stop-first --update-parallelism '$desired' '$service' >/dev/null"
   logf '%s[%s] 已提交更新，等待 %s/%s 就绪%s\n' "$C_BLUE" "$role" "$desired" "$desired" "$C_RESET"
   wait_service "$service" "$desired"
   logf '%s[%s] 部署成功，耗时 %s 秒%s\n' "$C_GREEN" "$role" "$((SECONDS - role_started))" "$C_RESET"
@@ -184,7 +195,7 @@ update_web_color() {
 }
 
 switch_router() {
-  local color="$1" current_config next_config
+  local color="$1" current_config next_config active_config
   if [[ "$color" == blue ]]; then
     current_config=web-caddyfile-green
     next_config=web-caddyfile-blue-38080
@@ -192,21 +203,51 @@ switch_router() {
     current_config=web-caddyfile-blue-38080
     next_config=web-caddyfile-green
   fi
+  active_config=$(remote "sudo docker service inspect xiaohuiji-web-router --format '{{range .Spec.TaskTemplate.ContainerSpec.Configs}}{{.ConfigName}}{{end}}'" 2>/dev/null || true)
+  if [[ "$active_config" == "$next_config" ]]; then
+    logf '%s[web-%s] Router 已指向目标颜色，跳过重复切流%s\n' "$C_GREEN" "$color" "$C_RESET"
+    return 0
+  fi
   remote "sudo docker service update --config-rm '$current_config' --config-add source='$next_config',target=/etc/caddy/Caddyfile xiaohuiji-web-router >/dev/null"
-  for _ in $(seq 1 3); do
+  for _ in $(seq 1 12); do
     if curl -fsS --max-time 5 "$WEB_EXTERNAL_READY_URL" >/dev/null; then return 0; fi
-    sleep 1
+    sleep 2
   done
+  active_config=$(remote "sudo docker service inspect xiaohuiji-web-router --format '{{range .Spec.TaskTemplate.ContainerSpec.Configs}}{{.ConfigName}}{{end}}'" 2>/dev/null || true)
+  router_replicas=$(remote "sudo docker service ls --filter name=xiaohuiji-web-router --format '{{.Replicas}}'" 2>/dev/null | head -1 || true)
+  if [[ "$active_config" == "$next_config" && "${router_replicas%%/*}" == "1" && "${router_replicas##*/}" == "1" ]]; then
+    logf '%s[web-%s] 公网 readyz 暂时超时，但 Router 已加载目标配置且任务就绪，保留切流%s\n' "$C_YELLOW" "$color" "$C_RESET" >&2
+    return 0
+  fi
   logf '%s[web-%s] 公网 readyz 失败，自动回切%s\n' "$C_RED" "$color" "$C_RESET" >&2
   remote "sudo docker service update --config-rm '$next_config' --config-add source='$current_config',target=/etc/caddy/Caddyfile xiaohuiji-web-router >/dev/null" || true
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 12); do
     if curl -fsS --max-time 5 "$WEB_EXTERNAL_READY_URL" >/dev/null; then
       logf '%s[web-%s] 已回切原版本%s\n' "$C_YELLOW" "$color" "$C_RESET" >&2
       break
     fi
-    sleep 1
+    sleep 2
   done
   return 1
+}
+
+deploy_web() {
+  local web_blue_current=false
+  local web_green_current=false
+  if [[ "$FORCE" != true ]]; then
+    service_has_digest xiaohuiji-web-blue && web_blue_current=true
+    service_has_digest xiaohuiji-web-green && web_green_current=true
+  fi
+  if [[ "$FORCE" == true || "$web_blue_current" != true || "$web_green_current" != true ]]; then
+    # Web starts with the other roles, while its own blue/green sequence
+    # remains serialized to avoid routing traffic to an unready color.
+    update_web_color blue
+    switch_router blue
+    update_web_color green
+    switch_router green
+  else
+    logf '%s[web] blue/green 都已是版本 %s，跳过部署%s\n' "$C_GREEN" "$TAG" "$C_RESET"
+  fi
 }
 
 non_web=()
@@ -221,6 +262,11 @@ for role in "${non_web[@]}"; do
   pids+=("$!")
   CHILD_PIDS+=("$!")
 done
+if printf '%s\n' "${ROLES[@]}" | grep -qx web; then
+  deploy_web &
+  pids+=("$!")
+  CHILD_PIDS+=("$!")
+fi
 failed=0
 for pid in "${pids[@]}"; do
   if ! wait "$pid"; then
@@ -228,24 +274,6 @@ for pid in "${pids[@]}"; do
   fi
 done
 CHILD_PIDS=()
-(( failed == 0 )) || { echo "非 Web 角色部署失败" >&2; exit 1; }
-
-if printf '%s\n' "${ROLES[@]}" | grep -qx web; then
-  web_blue_current=false
-  web_green_current=false
-  if [[ "$FORCE" != true ]]; then
-    service_has_digest xiaohuiji-web-blue && web_blue_current=true
-    service_has_digest xiaohuiji-web-green && web_green_current=true
-  fi
-  if [[ "$FORCE" == true || "$web_blue_current" != true || "$web_green_current" != true ]]; then
-    # 先更新非在线颜色，再切到它，更新另一色，最后切回，避免同一宿主端口被 start-first 占用。
-    update_web_color blue
-    switch_router blue
-    update_web_color green
-    switch_router green
-  else
-    logf '%s[web] blue/green 都已是版本 %s，跳过部署%s\n' "$C_GREEN" "$TAG" "$C_RESET"
-  fi
-fi
+(( failed == 0 )) || { echo "Swarm 角色部署失败" >&2; exit 1; }
 
 logf '%sSwarm 部署全部成功，镜像 %s，总耗时 %s 秒%s\n' "$C_GREEN" "${IMAGE_REPOSITORY}:${TAG}" "$((SECONDS - STARTED))" "$C_RESET"
