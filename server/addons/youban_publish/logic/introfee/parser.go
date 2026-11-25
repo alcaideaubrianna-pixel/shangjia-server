@@ -71,6 +71,17 @@ func RemoveNumbers(text string) string {
 	return numberPattern.ReplaceAllString(text, "")
 }
 
+func IsShortNeighbour(line string, limit int, protected func(string) bool) bool {
+	clean := strings.TrimSpace(Normalize(line))
+	if clean == "" || (protected != nil && protected(clean)) {
+		return false
+	}
+	if limit <= 0 {
+		limit = 6
+	}
+	return visibleLength(clean) < limit
+}
+
 func IsFeeLine(text string) bool {
 	return keywordPattern.MatchString(Normalize(text))
 }

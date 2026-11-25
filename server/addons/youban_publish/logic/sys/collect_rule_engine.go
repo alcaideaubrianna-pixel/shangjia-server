@@ -597,20 +597,18 @@ func removeCollectIntroFeeShortNeighbours(lines []string, feeIndex int) []string
 }
 
 func isCollectIntroFeeShortNeighbour(line string) bool {
-	clean := strings.TrimSpace(normalizeCollectKeywordText(line))
-	if clean == "" {
-		return false
-	}
-	for _, rule := range collectCriticalProfileLineRules {
-		if rule.MatchString(clean) {
-			return false
-		}
-	}
 	limit := 6
 	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS"))); err == nil && configured > 0 {
 		limit = configured
 	}
-	return len([]rune(clean)) < limit
+	return introfee.IsShortNeighbour(line, limit, func(clean string) bool {
+		for _, rule := range collectCriticalProfileLineRules {
+			if rule.MatchString(clean) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func isCollectIntroFeeStandaloneSuffix(text string) bool {
