@@ -22,6 +22,7 @@ import (
 	collectorin "hotgo/addons/telegram_collector/model/input/sysin"
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
+	gatewayservice "hotgo/addons/youban_tg_bot_gateway/service"
 	"hotgo/internal/library/cache"
 )
 
@@ -70,6 +71,9 @@ func (s *sSysPublish) AdminChannelCheck(ctx context.Context, in *sysin.ChannelCh
 	logChannelCheckStage(ctx, "persist_completed", in.TgAccountId, res.TargetChatId, 0, startedAt, nil)
 	cacheCtx, cancelCache := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	s.refreshAutoDeleteChannelCache(cacheCtx)
+	if refreshErr := gatewayservice.Gateway().Refresh(cacheCtx); refreshErr != nil {
+		g.Log().Warningf(cacheCtx, "频道检查后刷新TG Bot Gateway失败：%+v", refreshErr)
+	}
 	cancelCache()
 	return res, nil
 }
