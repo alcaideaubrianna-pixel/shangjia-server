@@ -26,7 +26,7 @@ var (
 	collectIntroFeeLooseAmountRule    = regexp.MustCompile(`(?:(?:介绍|推荐|牵线|居间|对接|感谢)费(?:用)?|大米|中介(?:服务)?费(?:用)?)[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
 	collectNumberRule                 = regexp.MustCompile(`[0-9０-９]+`)
 	collectIntroFeeStandaloneSuffix   = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
-	collectIntroFeeAttachedSourceMark = regexp.MustCompile(`(?:情诗|七七)[\p{Han}A-Za-z0-9_-]*$`)
+	collectIntroFeeAttachedSourceMark = regexp.MustCompile(`(?:情诗|七七)[\p{Han}A-Za-z0-9_，、,./-]*$`)
 	collectFeeKeywordPattern          = regexp.MustCompile(`(?:介绍|推荐|牵线|居间|对接|感谢)费|大米`)
 	collectMultiPricePattern          = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
 	collectCriticalProfileLineRules   = []*regexp.Regexp{
@@ -570,7 +570,7 @@ func applyCollectIntroFeeTruncateAt(text string, lineOffset int) string {
 	for index, line := range lines {
 		// Match against a normalized copy only; preserve the original text,
 		// emoji, spacing, and formatting in all retained lines.
-		if collectIntroFeeAmount(line) != "" {
+		if collectIntroFeeAmount(line) != "" || collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
 			cutoff = index
 			if previous := previousCollectContentLine(lines, index); previous >= 0 && collectShortTitleLine(lines[previous]) {
 				cutoff = previous
