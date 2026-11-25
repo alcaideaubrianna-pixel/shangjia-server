@@ -72,6 +72,7 @@ func (r *accountRuntime) Start(ctx context.Context) {
 	done := make(chan struct{})
 	r.done = done
 	r.mu.Unlock()
+	r.startRemoteExecutor(runtimeCtx)
 	go r.run(runtimeCtx, done)
 }
 

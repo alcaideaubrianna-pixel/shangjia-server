@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gotd/td/telegram"
+	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/internal/library/cache"
 
 	"hotgo/addons/youban_publish/model/input/sysin"
@@ -422,6 +423,13 @@ func (s *sSysPublish) verifyTgAccountChannelAdmin(ctx context.Context, tenantID,
 			return nil
 		})
 	})
+	if err != nil {
+		var remoteVerified bool
+		if remoteErr := s.ExecuteRemoteTelegram(ctx, tgAccountID, collectorservice.AccountRemoteOperationVerifyChannelAdmin, remoteChannelAdminPayload{ChannelID: channelID}, &remoteVerified); remoteErr == nil {
+			verified = remoteVerified
+			err = nil
+		}
+	}
 	if err != nil {
 		return gerror.Wrap(err, "验证新TG账号频道管理员权限失败")
 	}

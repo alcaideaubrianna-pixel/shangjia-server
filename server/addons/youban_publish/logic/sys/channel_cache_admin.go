@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,70 @@ import (
 	collectorservice "hotgo/addons/telegram_collector/service"
 	"hotgo/addons/youban_publish/model/input/sysin"
 )
+
+type remoteJoinChannelPayload struct {
+	Link string `json:"link"`
+}
+
+func init() {
+	collectorservice.RegisterAccountRemoteHandler(collectorservice.AccountRemoteOperationJoinChannel,
+		func(ctx context.Context, client *telegram.Client, raw json.RawMessage) (json.RawMessage, error) {
+			var in remoteJoinChannelPayload
+			if err := json.Unmarshal(raw, &in); err != nil {
+				return nil, err
+			}
+			link := strings.TrimSpace(in.Link)
+			var channel *tg.Channel
+			api := client.API()
+			if strings.Contains(link, "/+") || strings.Contains(link, "/joinchat/") {
+				hash := link[strings.LastIndex(link, "/")+1:]
+				updates, err := api.MessagesImportChatInvite(ctx, strings.TrimSpace(hash))
+				if err != nil {
+					return nil, err
+				}
+				if joined, ok := updates.(*tg.MessagesChatInviteJoinResultOk); ok {
+					channel = channelFromUpdates(joined.Updates)
+				}
+			} else {
+				username := strings.TrimPrefix(link, "@")
+				if index := strings.Index(username, "t.me/"); index >= 0 {
+					username = username[index+len("t.me/"):]
+				}
+				username = strings.Trim(username, "/")
+				resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+				if err != nil {
+					return nil, err
+				}
+				peer, ok := resolved.Peer.(*tg.PeerChannel)
+				if !ok {
+					return nil, gerror.New("链接不是频道或群聊")
+				}
+				for _, chat := range resolved.Chats {
+					if item, ok := chat.(*tg.Channel); ok && item.ID == peer.ChannelID {
+						channel = item
+						break
+					}
+				}
+				if channel == nil {
+					return nil, gerror.New("未找到频道信息")
+				}
+				hash, _ := channel.GetAccessHash()
+				updates, err := api.ChannelsJoinChannel(ctx, &tg.InputChannel{ChannelID: channel.ID, AccessHash: hash})
+				if err != nil {
+					return nil, err
+				}
+				if joined, ok := updates.(*tg.MessagesChatInviteJoinResultOk); ok {
+					if item := channelFromUpdates(joined.Updates); item != nil {
+						channel = item
+					}
+				}
+			}
+			if channel == nil {
+				return nil, gerror.New("Telegram未返回频道信息")
+			}
+			return json.Marshal(tgChannelDialogCache(channel))
+		})
+}
 
 func (s *sSysPublish) AdminChannelCacheAdd(ctx context.Context, in *sysin.ChannelCacheAddInp) (*sysin.ChannelCacheModel, error) {
 	account, err := s.ensureGroupPushCapability(ctx)
@@ -83,6 +148,17 @@ func (s *sSysPublish) AdminChannelCacheAdd(ctx context.Context, in *sysin.Channe
 		channelID = normalizeTelegramChannelChatID(strconv.FormatInt(result.ID, 10))
 		return nil
 	})
+	if err != nil {
+		var remote tgDialogCache
+		if remoteErr := s.ExecuteRemoteTelegram(ctx, in.TgAccountId, collectorservice.AccountRemoteOperationJoinChannel, remoteJoinChannelPayload{Link: link}, &remote); remoteErr == nil {
+			if err = s.upsertTgDialogCache(ctx, account.TenantId, in.TgAccountId, &remote, gtime.Now()); err != nil {
+				return nil, err
+			}
+			var item sysin.ChannelCacheModel
+			err = g.DB().Model(publishTgChannelTable).Safe().Ctx(ctx).Where("tenant_id", account.TenantId).Where("tg_account_id", in.TgAccountId).Where("channel_id", remote.ChannelId).Scan(&item)
+			return &item, err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

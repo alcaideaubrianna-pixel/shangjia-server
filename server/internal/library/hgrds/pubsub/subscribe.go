@@ -17,6 +17,37 @@ import (
 
 type SubHandler func(ctx context.Context, message *gredis.Message)
 
+// SubscribeReady subscribes on a dedicated connection and reports only after
+// Redis has acknowledged the subscription. The returned stop function closes
+// that connection and releases the subscription.
+func SubscribeReady(ctx context.Context, channel string, hr SubHandler) (func(), error) {
+	conn, err := g.Redis().Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = conn.Subscribe(ctx, channel); err != nil {
+		_ = conn.Close(ctx)
+		return nil, err
+	}
+	stopCtx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	go func() {
+		close(ready)
+		for {
+			message, receiveErr := conn.ReceiveMessage(stopCtx)
+			if receiveErr != nil {
+				return
+			}
+			handleMessage(hr, message)
+		}
+	}()
+	<-ready
+	return func() {
+		cancel()
+		_ = conn.Close(context.Background())
+	}, nil
+}
+
 type subscribeManager struct {
 	mutex sync.RWMutex
 	List  map[string]SubHandler
