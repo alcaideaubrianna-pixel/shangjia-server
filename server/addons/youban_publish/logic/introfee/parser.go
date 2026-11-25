@@ -82,6 +82,65 @@ func IsShortNeighbour(line string, limit int, protected func(string) bool) bool 
 	return visibleLength(clean) < limit
 }
 
+func ProcessSuffix(text, suffix string, limit int, protected func(string) bool) string {
+	suffix = strings.TrimSpace(suffix)
+	if suffix == "" {
+		return text
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for index, line := range lines {
+		if !IsFeeLine(line) {
+			continue
+		}
+		line = StripAttachedSourceMark(line)
+		fields := ParseFields(line)
+		normalized := Normalize(line)
+		keyword := keywordPattern.FindString(normalized)
+		feeIndex := strings.Index(normalized, keyword)
+		if fields.FirstAmount == "" {
+			prefix := ""
+			if feeIndex > 0 {
+				prefix = strings.TrimSpace(normalized[:feeIndex])
+			}
+			lines[index] = strings.TrimSpace(prefix + " 介绍费 " + suffix)
+			continue
+		}
+		feeTail := normalized
+		if feeIndex >= 0 {
+			feeTail = normalized[feeIndex:]
+		}
+		if IsComplexPriceLine(feeTail, fields) {
+			lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
+			continue
+		}
+		formatted := FormatFields(fields, suffix)
+		if feeIndex > 0 && formatted != "" {
+			prefix := strings.TrimSpace(normalized[:feeIndex])
+			if strings.TrimSpace(RemoveNumbers(prefix)) != "" {
+				formatted = prefix + " " + formatted
+			}
+		}
+		lines[index] = formatted
+	}
+	for index := 0; index < len(lines); index++ {
+		if !IsFeeLine(lines[index]) {
+			continue
+		}
+		if index > 0 && IsShortNeighbour(lines[index-1], limit, protected) {
+			lines = append(lines[:index-1], lines[index:]...)
+			index--
+		}
+		next := index + 1
+		for next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+			next++
+		}
+		if next < len(lines) && IsShortNeighbour(lines[next], limit, protected) {
+			lines = append(lines[:index+1], lines[next+1:]...)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func IsFeeLine(text string) bool {
 	return keywordPattern.MatchString(Normalize(text))
 }
