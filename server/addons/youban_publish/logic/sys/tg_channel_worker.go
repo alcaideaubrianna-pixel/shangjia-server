@@ -94,37 +94,39 @@ func telegramChannelPriorityAfterFailure(priority, previousRetryCount, retryCoun
 func telegramChannelQueueDecisionFor(job telegramJobRecord) telegramChannelQueueDecision {
 	reason := strings.TrimSpace(job.LastDispatchError)
 	switch {
-	case telegramChannelJobOwnsOrder(job) || telegramChannelJobHasUnknownResult(job):
-		// An in-flight or uncertain send always preserves the channel barrier,
-		// even if an earlier media-wait error remains on the record.
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 30 * time.Second}
+	case telegramChannelJobOwnsOrder(job):
+		// An in-flight or uncertain send preserves the channel barrier. The
+		// Redis predecessor wake path is the primary wake-up mechanism; this
+		// delay is only a liveness fallback when that wake is missed.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 10 * time.Second}
+	case telegramChannelJobHasUnknownResult(job):
+		// Only active send/reconciliation states are treated as uncertain.
+		// Historical timeout text on a pending/retry job must not turn a normal
+		// retry into a 30-second channel blocker.
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockUnknownResult, Delay: 10 * time.Second}
 	case (job.Status == telegramJobStatusPending || job.Status == telegramJobStatusRetryWait) && reason == "等待同频道前序推送任务完成":
 		// This job has not started; the separate durable predecessor still owns
 		// its safety barrier. Let unrelated ready profiles use the channel.
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockOrderWait, YieldHead: true, Delay: 30 * time.Second}
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockOrderWait, YieldHead: true, Delay: 5 * time.Second}
 	case strings.Contains(reason, "awaiting_account_fallback") || strings.Contains(reason, "账号降级"):
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 30 * time.Second}
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockAccount, Delay: 10 * time.Second}
 	case strings.Contains(reason, "媒体仍在异步处理中"):
-		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockMedia, YieldHead: true, Delay: 10 * time.Second}
+		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockMedia, YieldHead: true, Delay: 5 * time.Second}
 	default:
 		return telegramChannelQueueDecision{BlockReason: telegramChannelBlockNone, Delay: time.Second}
 	}
 }
 
 func telegramChannelJobHasUnknownResult(job telegramJobRecord) bool {
-	if job.Status == telegramJobStatusSending || job.Status == telegramJobStatusConfirming || job.Status == "reconciling" {
+	// Error text is only meaningful while the job is in an active send or
+	// reconciliation state. Once a job is pending/retry-wait, an old timeout
+	// string is historical context and must not block the whole channel.
+	switch job.Status {
+	case telegramJobStatusSending, telegramJobStatusConfirming, "reconciling":
 		return true
+	default:
+		return false
 	}
-	reason := strings.ToLower(strings.TrimSpace(job.LastDispatchError))
-	for _, marker := range []string{
-		"context canceled", "context deadline exceeded", "timeout", "超时",
-		"等待webhook", "等待对账", "协议号对账", "网络错误", "network error",
-	} {
-		if strings.Contains(reason, strings.ToLower(marker)) {
-			return true
-		}
-	}
-	return false
 }
 
 // telegramChannelQueueEnabled defaults to the channel queue transport. Set the
@@ -398,6 +400,20 @@ func (s *sSysPublish) processTelegramChannelQueueHead(ctx context.Context, chann
 			if enqueueErr := requeue(ctx, channelID, jobID, priority, time.UnixMilli(hold)); enqueueErr != nil {
 				return true, gerror.Wrap(enqueueErr, "频道队列未完成任务重入队失败")
 			}
+			if strings.Contains(reason, "媒体仍在异步处理中") {
+				// The media completion callback scans durable jobs to wake them.
+				// Keep this narrow media-wait state discoverable there after the
+				// Redis channel claim is requeued; otherwise PG remains queued
+				// while the callback only considers idle jobs.
+				if _, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+					Where("id", jobID).
+					WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+					Where("dispatch_status", tgDispatchStatusQueued).
+					WhereLike("last_dispatch_error", "媒体仍在异步处理中%").
+					Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update(); updateErr != nil {
+					g.Log().Warningf(ctx, "媒体等待任务状态回写失败 jobId:%d err:%+v", jobID, updateErr)
+				}
+			}
 			if predecessor := claimContext.predecessorID; predecessor > 0 && decision.BlockReason == telegramChannelBlockOrderWait {
 				wakeCtx, cancelWake := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 				wakeErr := registerTelegramPredecessorWake(wakeCtx, predecessor, channelID, jobID, priority, requeueScore)
@@ -475,14 +491,19 @@ func telegramChannelJobRequeueAt(job telegramJobRecord) (int64, string) {
 			return retryAt.TimestampMilli(), reason
 		}
 		return now.Add(3 * time.Second).UnixMilli(), reason
-	case telegramJobStatusSending, telegramJobStatusConfirming, "reconciling":
+	case telegramJobStatusSending:
 		if reason == "" {
-			reason = "任务正在发送或等待对账"
+			reason = "任务正在发送"
 		}
-		// An in-flight or uncertain Telegram attempt is owned by the
-		// watchdog/reconciliation path. Keep a delayed Redis member only as a
-		// liveness fallback; never hot-loop it as a normal send retry.
-		return now.Add(30 * time.Second).UnixMilli(), reason
+		// Sending is still protected by the order barrier, but the delayed
+		// member is only a liveness fallback. Webhook/reconciliation wakeups
+		// should make the common path immediate.
+		return now.Add(5 * time.Second).UnixMilli(), reason
+	case telegramJobStatusConfirming, "reconciling":
+		if reason == "" {
+			reason = "任务正在等待对账"
+		}
+		return now.Add(10 * time.Second).UnixMilli(), reason
 	default:
 		if reason == "" {
 			reason = "任务状态未收口"

@@ -282,11 +282,24 @@ func (s *sSysPublish) wakeProfileTelegramJobs(ctx context.Context, profileId int
 	if err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
 		Where("profile_id", profileId).
 		WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
-		Where("(dispatch_status = ? OR dispatch_status = '')", tgDispatchStatusIdle).
+		Where(`(
+			dispatch_status = ? OR dispatch_status = '' OR
+			(dispatch_status = ? AND last_dispatch_error LIKE ?)
+		)`, tgDispatchStatusIdle, tgDispatchStatusQueued, "媒体仍在异步处理中%").
 		Fields("id").Scan(&jobs); err != nil {
 		return err
 	}
 	for _, job := range jobs {
+		// A channel worker may have requeued a media-waiting job while the
+		// durable row still says queued. Normalize that narrow state before
+		// enqueueing so EnqueueTelegramJob can claim it again. Other queued
+		// jobs remain protected by the normal dispatch state machine.
+		_, _ = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).
+			Where("id", job.Id).
+			WhereIn("status", []string{"pending", "failed_retry", "unknown"}).
+			Where("dispatch_status", tgDispatchStatusQueued).
+			WhereLike("last_dispatch_error", "媒体仍在异步处理中%").
+			Data(g.Map{"dispatch_status": tgDispatchStatusIdle, "updated_at": gtime.Now()}).Update()
 		if err := s.EnqueueTelegramJob(ctx, job.Id, 0, false); err != nil {
 			g.Log().Warningf(ctx, "媒体就绪唤醒TG任务失败 media_profile_id:%d job_id:%d err:%+v", profileId, job.Id, err)
 		}
