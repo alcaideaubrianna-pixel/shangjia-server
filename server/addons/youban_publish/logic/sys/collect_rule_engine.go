@@ -628,7 +628,7 @@ func collectShortTitleLine(line string) bool {
 			visible++
 		}
 	}
-	return visible > 0 && visible < 5
+	return visible > 0 && visible < 6
 }
 
 func isCollectMaterialAlphaNumericCode(line string) bool {
