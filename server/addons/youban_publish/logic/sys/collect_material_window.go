@@ -453,6 +453,11 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 		defer func() { finishPairOnce(collectBusinessStepResult(windowErr, pairOutcome), windowErr) }()
 		role := strings.TrimSpace(event["material_role"].String())
 		if shouldResumeClassifiedDisplayEvent(event) {
+			if strings.TrimSpace(event["material_group_status"].String()) == "no_verify" {
+				finishPairOnce(collectPipelineCompleted, nil)
+				ctx = pairParent
+				return s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId)
+			}
 			settled, settleErr := s.collectVerifyEventsSettled(ctx, event, collectMaterialContextClosed(messageViews, index))
 			if settleErr != nil {
 				return settleErr
@@ -515,14 +520,14 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 				return err
 			}
 			if collectMaterialEventIngestOlderThan(event, collectMaterialVerifyWindow()) {
-				const unmatchedMessage = "验证窗口已结束，未找到同源验证视频，停止等待"
-				if err = s.ignoreCollectEvent(ctx, event["id"].Int64(), unmatchedMessage, "group"); err != nil {
-					return err
-				}
+				const noVerifyMessage = "验证窗口已结束，按无验证视频资料继续入库"
 				if _, err = pdao.YoubanPublishCollectEvent.Ctx(ctx).
 					Where("id", event["id"].Int64()).
-					Data(g.Map{"material_group_status": "unmatched", "updated_at": gtime.Now()}).Update(); err != nil {
-					return gerror.Wrap(err, "标记验证窗口未匹配状态失败")
+					Data(g.Map{"status": sysin.CollectEventStatusGroupCollect, "material_role": collectMaterialRoleDisplay, "material_parent_event_id": 0, "material_group_status": "no_verify", "error_message": noVerifyMessage, "processed_at": nil, "updated_at": gtime.Now()}).Update(); err != nil {
+					return gerror.Wrap(err, "标记无验证视频资料状态失败")
+				}
+				if err = s.processCollectEvent(ctx, event["id"].Int64(), payload.TenantId, payload.AccountId); err != nil {
+					return err
 				}
 				g.Log().Info(ctx, "采集验证窗口到期，停止无验证资料重试", g.Map{
 					"event":           "collect.admission.verify_expired",
@@ -530,6 +535,7 @@ func (s *sSysPublish) processCollectMessageWindow(ctx context.Context, payload c
 					"sourceId":        event["source_id"].Int64(),
 					"sourceMessageId": event["source_message_id"].Int64(),
 					"verifyWindow":    collectMaterialVerifyWindow().String(),
+					"outcome":         "process_without_verify",
 				})
 				return nil
 			}
