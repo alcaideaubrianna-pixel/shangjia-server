@@ -197,28 +197,28 @@ func normalizeCollectRuleBody(text string, rule gdb.Record) string {
 func normalizeCollectTextInOrder(rawText string, rule gdb.Record, mediaCount int) string {
 	lines := strings.Split(strings.ReplaceAll(rawText, "\r\n", "\n"), "\n")
 	body := make([]string, 0, len(lines))
-	feeLines := make([]string, 0, 2)
+	truncateIntroFee := rule["truncate_intro_fee_enabled"].Bool()
+	introFeeSuffix := strings.TrimSpace(rule["intro_fee_suffix"].String())
 	for _, line := range lines {
-		if collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
-			feeLine := line
-			if suffix := strings.TrimSpace(rule["intro_fee_suffix"].String()); suffix != "" {
-				feeLine = applyCollectIntroFeeSuffix(line, rawText, suffix)
-			}
-			feeLines = append(feeLines, feeLine)
+		if !collectFeeKeywordPattern.MatchString(normalizeCollectKeywordText(line)) {
+			body = append(body, line)
 			continue
+		}
+		if truncateIntroFee && introFeeSuffix == "" {
+			continue
+		}
+		if introFeeSuffix != "" {
+			line = applyCollectIntroFeeSuffix(line, rawText, introFeeSuffix)
 		}
 		body = append(body, line)
 	}
 	text := strings.Join(body, "\n")
-	if rule["truncate_intro_fee_enabled"].Bool() {
+	if truncateIntroFee {
 		text = applyCollectLeadingMaterialTitleCleanup(text)
 	}
 	text = applyCollectLineDeletes(text, collectRuleStrings(rule, "delete_lines"))
 	text = applyCollectTextDeletes(text, collectRuleStrings(rule, "delete_texts"))
 	text = applyCollectReplacements(text, collectRuleReplacements(rule))
-	if len(feeLines) > 0 {
-		text = strings.TrimSpace(text + "\n" + strings.Join(feeLines, "\n"))
-	}
 	if shouldDropCollectStandaloneCodeCaption(text, mediaCount) {
 		return ""
 	}
