@@ -158,3 +158,16 @@ func TestParseFieldsHistoricalAmounts(t *testing.T) {
 		})
 	}
 }
+
+func TestStripAttachedSourceMark(t *testing.T) {
+	cases := map[string]string{
+		"介绍费7888情诗J69":       "介绍费7888",
+		"介绍费：7888情诗w174":     "介绍费:7888",
+		"介绍费13888情诗w150、151": "介绍费13888",
+	}
+	for input, want := range cases {
+		if got := StripAttachedSourceMark(input); got != want {
+			t.Fatalf("StripAttachedSourceMark(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

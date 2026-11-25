@@ -23,10 +23,7 @@ var (
 	collectMaterialMetaLineRule      = regexp.MustCompile(`^\s*(?:标题|昵称|编号|编码|同行)\s*(?:[:：=].*)?\s*$`)
 	collectMaterialCodeLineRule      = regexp.MustCompile(`^\s*(?:[A-Za-z]{1,5}[-_ ]?[0-9０-９]{2,10}|[\p{Han}]{1,8}[-_ ]?[A-Za-z0-9０-９]{2,8})(?:[^A-Za-z0-9０-９]|$)`)
 	collectFeeKeywordPattern         = regexp.MustCompile(collectFeeKeywordExpression)
-	collectIntroFeeAmountRule        = regexp.MustCompile(collectFeeKeywordExpression + `[\s\p{Zs}]*[:：=；;，,]?[\s\p{Zs}]*([¥￥]?[\s\p{Zs}]*\d[\d,.]*(?:[\s\p{Zs}]*(?:元|万))?)`)
-	collectIntroFeeLooseAmountRule   = regexp.MustCompile(collectFeeKeywordExpression + `[^0-9０-９]{0,32}([¥￥]?[\s\p{Zs}]*[0-9０-９][0-9０-９,，.]*)`)
 	collectNumberRule                = regexp.MustCompile(`[0-9０-９]+`)
-	collectIntroFeeStandaloneSuffix  = regexp.MustCompile(`^[\p{Han}A-Za-z0-9]{1,32}$`)
 	collectMultiPricePattern         = regexp.MustCompile(`(?:打包|单个|单人|一人|双人|多人|套餐)`)
 	collectCriticalProfileLineRules  = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:年龄|年齡|age)[^0-9０-９\n]{0,12}[0-9０-９]`),
@@ -38,8 +35,6 @@ var (
 // Telegram forwards frequently replace the fee separator with full-width or
 // decorative punctuation. These characters are separators, not part of the
 // fee label or amount.
-const collectIntroFeeSeparatorChars = "：:；;，,./／|｜、·•"
-
 type collectRuleDecision struct {
 	Matched   bool
 	Skipped   bool
@@ -508,19 +503,7 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 }
 
 func stripCollectIntroFeeAttachedSourceMark(line string) string {
-	normalized := normalizeCollectKeywordText(line)
-	match := collectIntroFeeAmountRule.FindStringSubmatchIndex(normalized)
-	if len(match) < 4 {
-		match = collectIntroFeeLooseAmountRule.FindStringSubmatchIndex(normalized)
-	}
-	if len(match) < 4 {
-		return line
-	}
-	feeKeyword := collectFeeKeywordPattern.FindString(normalized)
-	if feeKeyword == "" {
-		return line
-	}
-	return strings.TrimSpace(normalized[:match[3]])
+	return introfee.StripAttachedSourceMark(line)
 }
 
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {

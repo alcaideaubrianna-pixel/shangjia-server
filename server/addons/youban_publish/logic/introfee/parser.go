@@ -40,6 +40,19 @@ func FormatFields(fields Fields, suffix string) string {
 	return strings.TrimSpace("介绍费 " + fields.FirstAmount + " " + suffix)
 }
 
+func StripAttachedSourceMark(line string) string {
+	normalized := Normalize(line)
+	fields := ParseFields(normalized)
+	if fields.FirstAmount == "" {
+		return line
+	}
+	amountIndex := strings.Index(normalized, fields.FirstAmount)
+	if amountIndex < 0 {
+		return line
+	}
+	return strings.TrimSpace(normalized[:amountIndex+len(fields.FirstAmount)])
+}
+
 func IsFeeLine(text string) bool {
 	return keywordPattern.MatchString(Normalize(text))
 }
