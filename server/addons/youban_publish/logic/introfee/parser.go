@@ -22,6 +22,11 @@ type Match struct {
 	NormalizedLine string
 }
 
+type Policy struct {
+	RemoveTail bool
+	Suffix     string
+}
+
 func Normalize(text string) string {
 	text = norm.NFKC.String(text)
 	return strings.Map(func(r rune) rune {
@@ -48,7 +53,7 @@ func Parse(line string) Match {
 	} else if match = prefixAmountPattern.FindStringSubmatch(normalized); len(match) > 1 {
 		amount = strings.Join(strings.Fields(strings.TrimSpace(match[1])), " ")
 	}
-	return Match{Matched: true, Keyword: keyword, Amount: amount, OriginalLine: line, NormalizedLine: normalized}
+	return Match{Matched: true, Keyword: "介绍费", Amount: amount, OriginalLine: line, NormalizedLine: normalized}
 }
 
 func Replace(line, suffix string) string {
@@ -59,10 +64,17 @@ func Replace(line, suffix string) string {
 	if strings.TrimSpace(suffix) == "" {
 		return ""
 	}
-	if match.Amount == "" {
-		return strings.TrimSpace(match.Keyword + " " + strings.TrimSpace(suffix))
+	prefix := ""
+	if keywordIndex := strings.Index(match.NormalizedLine, keywordPattern.FindString(match.NormalizedLine)); keywordIndex > 0 {
+		candidate := strings.TrimSpace(match.NormalizedLine[:keywordIndex])
+		if candidate != "" && prefixAmountPattern.FindString(match.NormalizedLine) == "" {
+			prefix = candidate + " "
+		}
 	}
-	return strings.TrimSpace(match.Keyword + " " + match.Amount + " " + strings.TrimSpace(suffix))
+	if match.Amount == "" {
+		return strings.TrimSpace(prefix + match.Keyword + " " + strings.TrimSpace(suffix))
+	}
+	return strings.TrimSpace(prefix + match.Keyword + " " + match.Amount + " " + strings.TrimSpace(suffix))
 }
 
 func RemoveLine(line string) string {
@@ -70,4 +82,44 @@ func RemoveLine(line string) string {
 		return line
 	}
 	return ""
+}
+
+func Process(text string, policy Policy) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for index, line := range lines {
+		if !Parse(line).Matched {
+			continue
+		}
+		if policy.RemoveTail && strings.TrimSpace(policy.Suffix) == "" {
+			cut := index
+			if previous := previousVisibleLine(lines, index); previous > 0 && visibleLength(lines[previous]) < 6 {
+				cut = previous
+			}
+			return strings.TrimSpace(strings.Join(lines[:cut], "\n"))
+		}
+		if strings.TrimSpace(policy.Suffix) != "" {
+			lines[index] = Replace(line, policy.Suffix)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func previousVisibleLine(lines []string, before int) int {
+	for index := before - 1; index >= 0; index-- {
+		if strings.TrimSpace(Normalize(lines[index])) != "" {
+			return index
+		}
+	}
+	return -1
+}
+
+func visibleLength(line string) int {
+	count := 0
+	for _, r := range Normalize(line) {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		count++
+	}
+	return count
 }
