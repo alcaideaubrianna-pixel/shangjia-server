@@ -1156,7 +1156,12 @@ func (s *sSysPublish) recoverPendingIdleTelegramJobs(ctx context.Context, limit 
 	var candidates []telegramJobRecord
 	var err error
 	if strings.EqualFold(strings.TrimSpace(g.DB().GetConfig().Type), "pgsql") {
-		err = g.DB().GetScan(ctx, &candidates, telegramPendingRecoveryPostgresSQL(),
+		// A stale active sender must not block an entire channel forever.
+		// Keep the normal recovery query unchanged for callers/tests, but add
+		// a bounded blocker cutoff to the production recovery pass.
+		err = g.DB().GetScan(ctx, &candidates, telegramPendingRecoveryPostgresSQLWithBlockCutoff(
+			telegramRecoveryTimeText(now.Add(-15*time.Minute)),
+		),
 			telegramRecoveryTimeText(now.Add(-messagePushPlanJobExpireAfter)), nowText, deadline, candidateLimit)
 	} else {
 		err = g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).
@@ -1408,6 +1413,10 @@ return {owner,processing,processingExists}`
 }
 
 func telegramPendingRecoveryPostgresSQL() string {
+	return telegramPendingRecoveryPostgresSQLWithBlockCutoff("")
+}
+
+func telegramPendingRecoveryPostgresSQLWithBlockCutoff(blockerCutoff string) string {
 	// Keep eligibility before DISTINCT ON: a disabled bot or a future retry
 	// must not hide another eligible job in the same channel. Only sort job
 	// identities; load the wide record after selecting bounded channel heads.
@@ -1436,7 +1445,7 @@ func telegramPendingRecoveryPostgresSQL() string {
 		LIMIT ?
 	), recoverable_heads AS MATERIALIZED (
 		SELECT c.id,c.created_at FROM channel_candidates c
-		WHERE ` + telegramPendingRecoveryChannelHeadSQL("c", "earlier") + `
+		WHERE ` + telegramPendingRecoveryChannelHeadSQLWithCutoff("c", "earlier", blockerCutoff) + `
 	)
 	SELECT j.* FROM recoverable_heads h
 	JOIN ` + publishTgJobTable + ` j ON j.id=h.id
@@ -1446,6 +1455,16 @@ func telegramPendingRecoveryPostgresSQL() string {
 // telegramPendingRecoveryChannelHeadSQL keeps heavily backlogged channels from
 // consuming the global candidate limit with jobs that cannot run yet.
 func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string {
+	return telegramPendingRecoveryChannelHeadSQLWithCutoff(jobAlias, earlierAlias, "")
+}
+
+func telegramPendingRecoveryChannelHeadSQLWithCutoff(jobAlias, earlierAlias, blockerCutoff string) string {
+	blockerAge := ""
+	if strings.TrimSpace(blockerCutoff) != "" {
+		// blockerCutoff is generated internally from telegramRecoveryTimeText;
+		// quote it here so it remains a literal and never becomes a query arg.
+		blockerAge = fmt.Sprintf(" AND %s.updated_at > '%s'", earlierAlias, strings.ReplaceAll(blockerCutoff, "'", "''"))
+	}
 	return `NOT EXISTS (
 		SELECT 1 FROM ` + publishTgJobTable + ` ` + earlierAlias + `
 		WHERE ` + earlierAlias + `.tenant_id=` + jobAlias + `.tenant_id
@@ -1457,6 +1476,7 @@ func telegramPendingRecoveryChannelHeadSQL(jobAlias, earlierAlias string) string
 					REPLACE(COALESCE(` + jobAlias + `.target_chat_id,''),'-100',''))
 			)
 			AND ` + telegramChannelBlockingJobSQL(earlierAlias) + `
+			` + blockerAge + `
 	)`
 }
 
