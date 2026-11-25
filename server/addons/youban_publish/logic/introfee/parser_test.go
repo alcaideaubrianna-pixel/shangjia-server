@@ -1,6 +1,9 @@
 package introfee
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseAndReplaceJoinedSourceMarker(t *testing.T) {
 	match := Parse("介绍费13888情诗w150、151\u2063\u200b")
@@ -186,5 +189,29 @@ func TestComplexPriceDetection(t *testing.T) {
 		if got := IsComplexPriceLine(tc.line, ParseFields(tc.line)); got != tc.complex {
 			t.Fatalf("IsComplexPriceLine(%q) = %v, want %v", tc.line, got, tc.complex)
 		}
+	}
+}
+
+func TestTruncateAtFee(t *testing.T) {
+	cases := map[string]string{
+		"正文内容\n橙子\n介绍费：7888\n尾部":     "正文内容",
+		"正文内容\n正常标题内容\n介绍费：7888\n尾部": "正文内容\n正常标题内容",
+		"正文\n联系方式":                   "正文\n联系方式",
+	}
+	for input, want := range cases {
+		if got := TruncateAtFee(input); got != want {
+			t.Fatalf("TruncateAtFee(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestProcessSuffixProtectsCriticalLines(t *testing.T) {
+	input := "年龄：25\n介绍费：7888 情诗X\n联系方式以及其他正文内容"
+	got := ProcessSuffix(input, "百花阁", 6, func(line string) bool {
+		return strings.Contains(line, "年龄")
+	})
+	want := "年龄：25\n介绍费 7888 百花阁\n联系方式以及其他正文内容"
+	if got != want {
+		t.Fatalf("ProcessSuffix() = %q, want %q", got, want)
 	}
 }

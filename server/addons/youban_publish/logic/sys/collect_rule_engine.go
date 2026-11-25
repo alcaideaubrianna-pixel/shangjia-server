@@ -64,7 +64,7 @@ func authoritativeCollectRawText(text string) string {
 	for i := 1; i < len(parts); i++ {
 		left := strings.TrimSpace(strings.Join(parts[:i], " | "))
 		right := strings.TrimSpace(strings.Join(parts[i:], " | "))
-		if collectFeeKeywordPattern.MatchString(left) && collectFeeKeywordPattern.MatchString(right) {
+		if introfee.IsFeeLine(left) && introfee.IsFeeLine(right) {
 			return left
 		}
 	}
