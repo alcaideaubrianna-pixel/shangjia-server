@@ -974,9 +974,22 @@ func (s *sSysPublish) profileCycleDueRowsShard(ctx context.Context, limit, shard
 	return rows, nil
 }
 
-func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCycleDueRow, channelBacklog map[int64]int) (bool, error) {
+func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCycleDueRow, channelBacklog map[int64]int) (dispatched bool, err error) {
+	outcome := "unknown"
+	defer func() {
+		if err != nil {
+			outcome = "error"
+		}
+		if dispatched {
+			outcome = "submitted"
+		}
+		recordProfileCycleDispatch(ctx, outcome)
+	}()
 	ready, err := s.prepareProfileCycleDue(ctx, row)
 	if err != nil || !ready {
+		if err == nil {
+			outcome = "not_ready"
+		}
 		return false, err
 	}
 	// A due job keeps the schedule captured when it was created. Changes to
@@ -992,6 +1005,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		channelBacklog[row.ChannelId] = backlog
 	}
 	if !profileCycleChannelHasCapacity(ctx, backlog) {
+		outcome = "backlog"
 		nextAt := gtime.Now().Add(profileCycleRetryDelay)
 		_, err := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
 			"next_cycle_at":       nextAt,
@@ -1006,6 +1020,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, err
 	}
 	if active {
+		outcome = "child_active"
 		nextAt := gtime.Now().Add(profileCycleClaimLease)
 		_, err = g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).Data(g.Map{
 			"next_cycle_at": nextAt, "updated_at": gtime.Now(),
@@ -1028,12 +1043,14 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
+		outcome = "claim_lost"
 		return false, nil
 	}
 	removeProfileCycleDue(ctx, row.JobId)
 	operationNo := dueProfileCycleOperationNo(row.JobId, row.DispatchCount+1, row.ProfileId, row.ChannelId)
 	err = s.submitProfilePublish(ctx, row.ProfileId, row.TenantId, row.AccountId, 0, operationNo, []int64{row.ChannelId}, true)
 	if errors.Is(err, errProfileCycleMediaPending) {
+		outcome = "media_pending"
 		// No send job was created. Media waiting is not a Telegram failure and
 		// must not exhaust the source plan's consecutive send failure budget.
 		nextAt := gtime.Now().Add(5 * time.Minute)
@@ -1047,6 +1064,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, nil
 	}
 	if errors.Is(err, errTelegramPublishPermissionPaused) {
+		outcome = "permission_paused"
 		nextAt := gtime.Now().Add(time.Hour)
 		_, updateErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
 			Data(g.Map{"next_cycle_at": nextAt, "last_dispatch_error": err.Error()}).Update()
@@ -1055,6 +1073,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return false, updateErr
 	}
 	if err == nil {
+		outcome = "submitted"
 		_, resetErr := g.DB().Model(publishTgJobTable).Safe().Ctx(ctx).Where("id", row.JobId).
 			Data(g.Map{"cycle_failure_count": 0, "last_dispatch_error": "", "updated_at": gtime.Now()}).Update()
 		if resetErr != nil {
@@ -1063,6 +1082,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		return true, nil
 	}
 	if errors.Is(err, errPublishProfileUnavailable) {
+		outcome = "disabled_profile"
 		_ = s.deactivateChannelProfile(ctx, row.ChannelId, row.ProfileId)
 		return false, s.disableProfileCycleJob(ctx, row.JobId, "资料已下架或不可发布")
 	}
@@ -1071,6 +1091,7 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 	data := g.Map{"next_cycle_at": gtime.Now().Add(profileCycleRetryDelay), "cycle_failure_count": failureCount,
 		"last_dispatch_error": message, "updated_at": gtime.Now()}
 	if isPermanentProfileCycleError(err) || failureCount >= profileCycleFailureThreshold {
+		outcome = "disabled_failure"
 		data["cycle_enabled"] = 0
 		data["next_cycle_at"] = nil
 		data["last_dispatch_error"] = message + "；连续失败达到阈值，已暂停循环"
@@ -1081,6 +1102,9 @@ func (s *sSysPublish) dispatchDueProfileCycle(ctx context.Context, row profileCy
 		indexAccountProfileCycleDue(ctx, publishAccountScope{TenantID: row.TenantId, AccountID: row.AccountId}, row.JobId, nextAt)
 	} else {
 		removeProfileCycleDue(ctx, row.JobId)
+	}
+	if outcome == "unknown" {
+		outcome = "retryable_error"
 	}
 	return false, err
 }
