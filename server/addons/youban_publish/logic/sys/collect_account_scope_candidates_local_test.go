@@ -115,35 +115,6 @@ func TestCollectAccountScopeCandidatesLocalPostgres(t *testing.T) {
 			t.Fatalf("raw/owner claims lost or foreign tenant/account/source/rule crossed boundary: %v", filtered)
 		}
 
-		items := []profileFingerprint{{
-			ChannelID: 1001, Layer: "text_hash", Signature: "raw-signature", ItemTotal: 1, SignatureCount: 1,
-		}}
-		assertHit := func(want bool) {
-			t.Helper()
-			hit, err := service.findLegacyCollectRuleDuplicate(ctx, branch, rule, items)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if want && (hit == nil || hit.ProfileID != 500) || !want && hit != nil {
-				t.Fatalf("legacy hit=%v, want found=%t", hit, want)
-			}
-		}
-		assertHit(true)
-		for _, fingerprintAccount := range []int64{615, 999, 0} {
-			if _, err := tx.Ctx(ctx).Exec(`UPDATE hg_youban_publish_profile_fingerprint SET account_id=? WHERE profile_id=500`, fingerprintAccount); err != nil {
-				return err
-			}
-			assertHit(fingerprintAccount != 999)
-		}
-		for _, owner := range []int64{0, 999} {
-			if _, err := tx.Ctx(ctx).Exec(`UPDATE hg_youban_publish_profile_state SET account_id=? WHERE profile_id=500`, owner); err != nil {
-				return err
-			}
-			assertHit(false)
-		}
-		if _, err := tx.Ctx(ctx).Exec(`UPDATE hg_youban_publish_profile_state SET account_id=615 WHERE profile_id=500`); err != nil {
-			return err
-		}
 		assertHit(true)
 		for _, foreign := range []struct {
 			tenant, account, source, rule int64

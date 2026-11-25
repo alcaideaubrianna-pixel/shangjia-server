@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/corona10/goimagehash"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	publishmodel "hotgo/addons/youban_publish/model"
@@ -143,145 +141,19 @@ func (s *sSysPublish) profileFingerprintSearchCandidatesExactFirst(ctx context.C
 	if fingerprint == nil || fingerprint.PHash == nil {
 		return []publishProfilePHashDistance{}, nil
 	}
-	if fingerprint.MD5 != "" {
-		startedAt := time.Now()
-		finish := scantrace.Begin(ctx, "query.md5")
-		exact, err := mediaMD5CandidateMatches(ctx, fingerprint.MD5, scope, candidateProfileIds)
-		finish(err)
-		observeBotMediaSearchStage(ctx, "md5_query", startedAt, err)
-		if err != nil {
-			return nil, err
-		}
-		if len(exact) > 0 {
-			return exact, nil
-		}
-	}
 	startedAt := time.Now()
-	var exact []publishProfilePHashDistance
-	var err error
-	finish := scantrace.Begin(ctx, "query.phash_exact")
-	if isPostgresDatabase() {
-		exact, err = mediaPHashExactCandidateMatches(ctx, fingerprint.PHash, scope, candidateProfileIds)
-	} else {
-		exactInput := *in
-		exactInput.Threshold = 0
-		exact, err = s.profilePHashSearchCandidates(ctx, fingerprint.PHash, &exactInput, scope, candidateProfileIds)
-	}
-	observeBotMediaSearchStage(ctx, "phash_exact", startedAt, err)
-	finish(err)
-	if err != nil {
-		return nil, err
-	}
-	if len(exact) > 0 {
-		return exact, nil
-	}
-	startedAt = time.Now()
-	finish = scantrace.Begin(ctx, "query.phash_approx")
+	finish := scantrace.Begin(ctx, "query.phash_lsh")
 	items, err := s.profilePHashSearchCandidates(ctx, fingerprint.PHash, in, scope, candidateProfileIds)
 	finish(err)
-	observeBotMediaSearchStage(ctx, "phash_approx", startedAt, err)
+	observeBotMediaSearchStage(ctx, "phash_lsh", startedAt, err)
 	return items, err
 }
 
-func mediaPHashExactCandidateMatches(ctx context.Context, queryHash *goimagehash.ImageHash, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	if queryHash == nil || scope == nil || len(scope.Partitions) == 0 {
-		return []publishProfilePHashDistance{}, nil
-	}
-	mod := g.DB().Model("hg_youban_publish_media_fingerprint f").Safe().Ctx(ctx).
-		Fields("f.media_id,f.profile_id,f.account_id,f.tenant_id,f.media_type").
-		Where("f.phash_bits = ('x'||?)::bit(64)", fmt.Sprintf("%016x", queryHash.GetHash())).
-		Where("f.media_type", "image").
-		WhereNull("f.deleted_at")
-	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("f", scope.Partitions); scopeSQL != "" {
-		mod = mod.Where("("+scopeSQL+")", scopeArgs...)
-	} else {
-		return []publishProfilePHashDistance{}, nil
-	}
-	if len(candidateProfileIds) > 0 {
-		mod = mod.WhereIn("f.profile_id", uniqueIds(candidateProfileIds))
-	}
-	mod = mod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=f.profile_id AND p.deleted_at IS NULL)")
-	mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=f.profile_id AND ps.account_id=f.account_id AND ps.tenant_id=f.tenant_id AND ps.deleted_at IS NULL)")
-	rows := make([]mediaPHashBucketCandidateRow, 0)
-	if err := mod.Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "查询媒体pHash精确匹配失败")
-	}
-	items := make([]publishProfilePHashDistance, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
-	}
-	// Anti-scan output is deliberately stored as an alias fingerprint because it
-	// is generated after the source media row is created.  Include it in the
-	// exact phase so a user searching the generated image gets a zero-distance
-	// hit instead of falling through to an approximate match.
-	if err := ensureMediaPHashAliasBucketTable(ctx); err != nil {
-		return nil, err
-	}
-	alias := fmt.Sprintf("%016x", queryHash.GetHash())
-	aliasMod := g.DB().Model(publishMediaPHashAliasBucketTable+" a").Safe().Ctx(ctx).
-		Fields("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").
-		Where("a.hash_value", alias).
-		Where("a.media_type", "image")
-	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("a", scope.Partitions); scopeSQL != "" {
-		aliasMod = aliasMod.Where("("+scopeSQL+")", scopeArgs...)
-	} else {
-		return mediaPHashDeduplicateProfiles(items), nil
-	}
-	if len(candidateProfileIds) > 0 {
-		aliasMod = aliasMod.WhereIn("a.profile_id", uniqueIds(candidateProfileIds))
-	}
-	aliasMod = aliasMod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=a.profile_id AND p.deleted_at IS NULL)").
-		Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=a.profile_id AND ps.account_id=a.account_id AND ps.tenant_id=a.tenant_id AND ps.deleted_at IS NULL)")
-	aliasRows := make([]mediaPHashBucketCandidateRow, 0)
-	if err := aliasMod.Group("a.media_id,a.profile_id,a.account_id,a.tenant_id,a.media_type").Scan(&aliasRows); err != nil {
-		return nil, gerror.Wrap(err, "查询防扫图pHash精确匹配失败")
-	}
-	for _, row := range aliasRows {
-		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
-	}
-	return mediaPHashDeduplicateProfiles(items), nil
-}
-
-func mediaMD5CandidateMatches(ctx context.Context, md5Value string, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	md5Value = strings.TrimSpace(strings.ToLower(md5Value))
-	if md5Value == "" || scope == nil || len(scope.Partitions) == 0 {
-		return []publishProfilePHashDistance{}, nil
-	}
-	mod := g.DB().Model(publishMediaTable+" m").Safe().Ctx(ctx).
-		Fields("m.id AS media_id,m.profile_id,m.media_type").
-		Where("m.md5", md5Value).
-		Where("m.media_type IN ('image','video')").
-		WhereNull("m.deleted_at")
-	if scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("m", scope.Partitions); scopeSQL != "" {
-		mod = mod.Where("("+scopeSQL+")", scopeArgs...)
-	} else {
-		return []publishProfilePHashDistance{}, nil
-	}
-	if len(candidateProfileIds) > 0 {
-		mod = mod.WhereIn("m.profile_id", uniqueIds(candidateProfileIds))
-	}
-	mod = mod.Where("EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=m.profile_id AND p.deleted_at IS NULL)")
-	mod = mod.Where("EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=m.profile_id AND ps.account_id=m.account_id AND ps.tenant_id=m.tenant_id AND ps.deleted_at IS NULL)")
-	rows := make([]mediaPHashBucketCandidateRow, 0)
-	if err := mod.Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "查询媒体MD5精确匹配失败")
-	}
-	items := make([]publishProfilePHashDistance, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: 0, MediaId: row.MediaId, MediaType: row.MediaType})
-	}
-	return mediaPHashDeduplicateProfiles(items), nil
-}
-
+// profilePHashSearchCandidates is the single media similarity query path.
+// LSH performs the recall and the Go-side distance check keeps the result
+// threshold exact without maintaining a second exact-match index.
 func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	if isVectorPHashEnabled(ctx) {
-		items, err := s.profilePHashVectorCandidates(ctx, queryHash, in, scope, candidateProfileIds)
-		if err == nil {
-			return items, nil
-		}
-		g.Log().Warningf(ctx, "pgvector pHash 查询失败，回退 LSH: %v", err)
-	}
-	if scope == nil || len(scope.Partitions) == 0 {
+	if queryHash == nil || in == nil || scope == nil || len(scope.Partitions) == 0 {
 		return []publishProfilePHashDistance{}, nil
 	}
 	rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, mediaPHashNormalizedValue(queryHash), in.Threshold, scope.Partitions, candidateProfileIds, "image", 0)
@@ -298,18 +170,9 @@ func (s *sSysPublish) profilePHashSearchCandidates(ctx context.Context, queryHas
 		if distanceErr != nil || distance > in.Threshold {
 			continue
 		}
-		items = append(items, publishProfilePHashDistance{
-			ProfileId: row.ProfileId,
-			Distance:  distance,
-			MediaId:   row.MediaId,
-			MediaType: row.MediaType,
-		})
+		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: distance, MediaId: row.MediaId, MediaType: row.MediaType})
 	}
 	return mediaPHashDeduplicateProfiles(items), nil
-}
-
-func isVectorPHashEnabled(ctx context.Context) bool {
-	return g.Cfg().MustGet(ctx, "youbanPublish.mediaSearch.pgvector.enabled", false).Bool() && isPostgresDatabase()
 }
 
 func isPostgresDatabase() bool {
@@ -317,55 +180,8 @@ func isPostgresDatabase() bool {
 	return dbType == "pgsql" || dbType == "postgres"
 }
 
-func (s *sSysPublish) profilePHashVectorCandidates(ctx context.Context, queryHash *goimagehash.ImageHash, in *sysin.ProfileImageSearchInp, scope *publishmodel.MediaSearchScope, candidateProfileIds []int64) ([]publishProfilePHashDistance, error) {
-	if queryHash == nil || scope == nil || len(scope.Partitions) == 0 {
-		return []publishProfilePHashDistance{}, nil
-	}
-	queryHashValue := fmt.Sprintf("%016x", queryHash.GetHash())
-	args := []any{queryHashValue, queryHashValue, in.Threshold}
-	where := []string{"f.deleted_at IS NULL", "f.phash_bits IS NOT NULL", "(f.phash_bits <~> ('x'||?)::bit(64)) <= ?"}
-	scopeSQL, scopeArgs := mediaPHashBucketScopeSQL("f", scope.Partitions)
-	if scopeSQL == "" {
-		return []publishProfilePHashDistance{}, nil
-	}
-	where = append(where, "("+scopeSQL+")")
-	args = append(args, scopeArgs...)
-	where = append(where, "f.media_type='image'")
-	where = append(where, "EXISTS (SELECT 1 FROM hg_youban_publish_profile_state ps WHERE ps.profile_id=f.profile_id AND ps.tenant_id=f.tenant_id AND ps.account_id=f.account_id AND ps.deleted_at IS NULL)")
-	where = append(where, "EXISTS (SELECT 1 FROM hg_content_profile p WHERE p.id=f.profile_id AND p.deleted_at IS NULL)")
-	if len(candidateProfileIds) > 0 {
-		ids := uniqueIds(candidateProfileIds)
-		where = append(where, "f.profile_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")")
-		for _, id := range ids {
-			args = append(args, id)
-		}
-	}
-	limit := mediaPHashBucketMaxCandidates
-	if limit > 5000 {
-		limit = 5000
-	}
-	rows := make([]mediaPHashBucketCandidateRow, 0)
-	query := `SELECT f.media_id,f.profile_id,f.account_id,f.tenant_id,f.media_type,
- f.md5 AS hash_value, (f.phash_bits <~> ('x'||?)::bit(64)) AS bucket_hits
- FROM hg_youban_publish_media_fingerprint f WHERE ` + strings.Join(where, " AND ") + ` ORDER BY f.phash_bits <~> ('x'||?)::bit(64) LIMIT ` + fmt.Sprintf("%d", limit)
-	// Append the final hash used by ORDER BY.
-	args = append(args, queryHashValue)
-	if err := g.DB().Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
-		if _, err := tx.Exec("SET LOCAL hnsw.ef_search = 200"); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("SET LOCAL hnsw.iterative_scan = 'strict_order'"); err != nil {
-			return err
-		}
-		return tx.Raw(query, args...).Scan(&rows)
-	}); err != nil {
-		return nil, err
-	}
-	items := make([]publishProfilePHashDistance, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, publishProfilePHashDistance{ProfileId: row.ProfileId, Distance: row.BucketHits, MediaId: row.MediaId, MediaType: row.MediaType})
-	}
-	return mediaPHashDeduplicateProfiles(items), nil
+func isVectorPHashEnabled(ctx context.Context) bool {
+	return false
 }
 
 func mediaPHashDeduplicateProfiles(items []publishProfilePHashDistance) []publishProfilePHashDistance {

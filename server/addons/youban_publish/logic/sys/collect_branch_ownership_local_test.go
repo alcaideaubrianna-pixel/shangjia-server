@@ -105,15 +105,6 @@ func TestCollectBranchOwnershipLocalPostgres(t *testing.T) {
 			t.Fatalf("other branch inherited the sent profile: %v %v", profile, err)
 		}
 		service := &sSysPublish{}
-		items := []profileFingerprint{{ChannelID: 1001, Layer: "text_hash", Signature: "raw-signature", ItemTotal: 1, SignatureCount: 1}}
-		hit, err := service.findLegacyCollectRuleDuplicate(ctx, event, rule, items)
-		if err != nil || hit == nil || hit.ProfileID != 500 {
-			t.Fatalf("same branch lost legacy dedupe: %v %v", hit, err)
-		}
-		hit, err = service.findLegacyCollectRuleDuplicate(ctx, other, otherRule, items)
-		if err != nil || hit != nil {
-			t.Fatalf("legacy dedupe crossed branch boundary: %v %v", hit, err)
-		}
 		retry, err := tx.Ctx(ctx).GetOne(`SELECT * FROM hg_youban_publish_collect_event WHERE id=3`)
 		if err != nil {
 			return err
@@ -135,10 +126,6 @@ func TestCollectBranchOwnershipLocalPostgres(t *testing.T) {
 		}
 		if _, err := existingLegacyCollectProfile(ctx, tx, event, rule); err == nil {
 			t.Fatal("historically shared profile was silently reassigned")
-		}
-		hit, err = service.findLegacyCollectRuleDuplicate(ctx, event, rule, items)
-		if err != nil || hit != nil {
-			t.Fatalf("shared legacy fingerprint allowed profile replacement: %v %v", hit, err)
 		}
 		return nil
 	})

@@ -71,10 +71,6 @@ func authoritativeCollectRawText(text string) string {
 	return text
 }
 
-func formatCollectIntroFeeFields(fields collectIntroFeeFields, suffix string) string {
-	return introfee.FormatFields(fields, suffix)
-}
-
 type collectReplaceRule struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -500,108 +496,12 @@ func isCollectIntroFeeSourceMarkLine(line string) bool {
 	return strings.Contains(normalizeCollectKeywordText(line), "情诗")
 }
 
-func stripCollectIntroFeeAttachedSourceMark(line string) string {
-	return introfee.StripAttachedSourceMark(line)
-}
-
 func applyCollectIntroFeeSuffix(text, original, suffix string) string {
-	suffix = strings.TrimSpace(suffix)
-	if suffix == "" {
-		return text
-	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	for index, line := range lines {
-		if !introfee.IsFeeLine(line) {
-			continue
-		}
-		line = stripCollectIntroFeeAttachedSourceMark(line)
-		lines[index] = line
-		fields := parseCollectIntroFeeFields(line)
-		normalizedLine := normalizeCollectKeywordText(line)
-		feeKeyword := collectFeeKeywordPattern.FindString(normalizedLine)
-		feeIndex := strings.Index(normalizedLine, feeKeyword)
-		complexAmount := introfee.IsComplexPriceLine(normalizedLine, fields)
-		// A hyphen is commonly part of a trailing name/label (for example
-		// "7888强盛-高启强"), not evidence of multiple prices. Preserve only
-		// explicit multi-price separators here; otherwise normalize to the first
-		// amount and the effective channel suffix.
-		// A slash immediately after the fee label is a common separator
-		// ("介绍费/7888qb KK"), not a multi-price format. Treat it like a
-		// colon so the amount and configured channel suffix are normalized.
-		feeTail := normalizedLine
-		if feeIndex >= 0 {
-			feeTail = normalizedLine[feeIndex:]
-		}
-		complexFormat := introfee.IsComplexPriceLine(feeTail, fields)
-		if fields.FirstAmount == "" {
-			// Some forwards contain only a city/name after the fee label, often
-			// separated by zero-width characters ("介绍费：秦皇岛 Gus...").
-			// Do not publish that opaque source text; normalize it to the
-			// configured channel suffix.
-			prefix := ""
-			if feeIndex > 0 {
-				prefix = strings.TrimSpace(normalizedLine[:feeIndex])
-			}
-			lines[index] = strings.TrimSpace(strings.TrimSpace(prefix) + " 介绍费 " + suffix)
-			continue
-		}
-		if fields.FirstAmount == "" || complexAmount || complexFormat {
-			if !strings.HasSuffix(strings.TrimSpace(line), suffix) {
-				lines[index] = strings.TrimRightFunc(line, unicode.IsSpace) + " " + suffix
-			}
-			continue
-		}
-		formatted := formatCollectIntroFeeFields(fields, suffix)
-		// Keep an introduction or other prose that precedes an inline fee:
-		// "自我介绍: 啊啊啊 介绍费 7888".
-		if feeIndex > 0 && formatted != "" {
-			prefix := strings.TrimSpace(normalizedLine[:feeIndex])
-			// 前置金额已经进入格式化结果，只保留真正的前置正文，避免“7888介绍费”重复金额。
-			if strings.TrimSpace(introfee.RemoveNumbers(prefix)) != "" {
-				formatted = prefix + " " + formatted
-			}
-		}
-		lines[index] = formatted
-	}
-
-	// Normalize every fee row before removing short standalone labels between
-	// rows, so a second fee row cannot retain an old source suffix.
-	for index := 0; index < len(lines); index++ {
-		if !introfee.IsFeeLine(lines[index]) {
-			continue
-		}
-		if index > 0 && isCollectIntroFeeShortNeighbour(lines[index-1]) {
-			lines = append(lines[:index-1], lines[index:]...)
-			index--
-		}
-		nextContent := index + 1
-		for nextContent < len(lines) && strings.TrimSpace(lines[nextContent]) == "" {
-			nextContent++
-		}
-		if nextContent < len(lines) && isCollectIntroFeeShortNeighbour(lines[nextContent]) {
-			lines = append(lines[:index+1], lines[nextContent+1:]...)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func removeCollectIntroFeeShortNeighbours(lines []string, feeIndex int) []string {
-	if feeIndex > 0 && isCollectIntroFeeShortNeighbour(lines[feeIndex-1]) {
-		lines = append(lines[:feeIndex-1], lines[feeIndex:]...)
-		feeIndex--
-	}
-	if feeIndex+1 < len(lines) && isCollectIntroFeeShortNeighbour(lines[feeIndex+1]) {
-		lines = append(lines[:feeIndex+1], lines[feeIndex+2:]...)
-	}
-	return lines
-}
-
-func isCollectIntroFeeShortNeighbour(line string) bool {
 	limit := 6
 	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("YOUBAN_INTRO_FEE_NEIGHBOR_MAX_CHARS"))); err == nil && configured > 0 {
 		limit = configured
 	}
-	return introfee.IsShortNeighbour(line, limit, func(clean string) bool {
+	return introfee.ProcessSuffix(text, suffix, limit, func(clean string) bool {
 		for _, rule := range collectCriticalProfileLineRules {
 			if rule.MatchString(clean) {
 				return true

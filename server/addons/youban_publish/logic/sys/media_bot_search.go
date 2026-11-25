@@ -158,15 +158,7 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		return nil, 0, lastHashErr
 	}
 	queryCtx, cancelQueries := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
-	fingerprintMatches, err := loadBotMediaSearchCandidatesExactFirstBatch(queryCtx, fingerprints,
-		func(exactCtx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
-			if !isPostgresDatabase() {
-				return make([][]*botMediaSearchCandidate, len(items)), nil
-			}
-			return botMediaExactCandidates(exactCtx, items, searchScope)
-		}, func(queryCtx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
-			return s.botMediaApproximateBatch(queryCtx, items, searchIn, searchScope)
-		})
+	fingerprintMatches, err := s.botMediaApproximateBatch(queryCtx, fingerprints, searchIn, searchScope)
 	cancelQueries()
 	// Even an entirely failed query must be distinguishable from a complete
 	// empty match, both to callers and to incident replay assertions.
@@ -207,55 +199,6 @@ func (s *sSysPublish) BotProfileMediaSearch(ctx context.Context, in *sysin.BotMe
 		return nil, 0, err
 	}
 	return orderBotMediaSearchNotes(list, profileIds), total, nil
-}
-
-// Exact lookups run for the whole album before approximate queries consume the
-// shared budget. Preserve input slots so multi-image ranking remains unchanged.
-func loadBotMediaSearchCandidatesExactFirst(ctx context.Context, fingerprints []*mediaFingerprint, exact func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error), approximate func(context.Context, *mediaFingerprint) ([]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
-	return loadBotMediaSearchCandidatesExactFirstBatch(ctx, fingerprints, exact, func(ctx context.Context, remaining []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
-		return loadBotMediaSearchCandidates(ctx, remaining, approximate)
-	})
-}
-
-func loadBotMediaSearchCandidatesExactFirstBatch(ctx context.Context, fingerprints []*mediaFingerprint, exact func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error), approximate func(context.Context, []*mediaFingerprint) ([][]*botMediaSearchCandidate, error)) ([][]*botMediaSearchCandidate, error) {
-	unique := uniqueBotMediaFingerprints(fingerprints)
-	if len(unique) == 0 {
-		return nil, nil
-	}
-	results, err := exact(ctx, unique)
-	exactHits := 0
-	for _, group := range results {
-		if len(group) > 0 {
-			exactHits++
-		}
-	}
-	scantrace.Record(ctx, "query.exact_batch.summary", g.Map{"uniqueItems": len(unique), "matchedItems": exactHits, "remainingItems": len(unique) - exactHits}, err)
-	if err != nil {
-		return results, err
-	}
-	if len(results) != len(unique) {
-		return nil, gerror.New("扫图精确匹配结果数量不一致")
-	}
-	remaining := make([]*mediaFingerprint, 0, len(unique))
-	indices := make([]int, 0, len(unique))
-	for i, f := range unique {
-		if len(results[i]) == 0 {
-			remaining = append(remaining, f)
-			indices = append(indices, i)
-		}
-	}
-	if len(remaining) == 0 {
-		return results, nil
-	}
-	more, err := approximate(ctx, remaining)
-	if len(more) > len(indices) || (err == nil && len(more) != len(indices)) {
-		return results, gerror.New("扫图近似匹配结果数量不一致")
-	}
-	scantrace.Record(ctx, "query.approx_batch.summary", g.Map{"inputItems": len(remaining), "matchedProfiles": len(rankBotMediaSearchCandidates(more)), "incomplete": err != nil}, err)
-	for i, group := range more {
-		results[indices[i]] = group
-	}
-	return results, err
 }
 
 func botMediaSentFileCandidates(ctx context.Context, fileIDs []string, scope *publishmodel.MediaSearchScope) (map[string][]*botMediaSearchCandidate, error) {
@@ -447,16 +390,10 @@ func (s *sSysPublish) botMediaFingerprintCandidates(ctx context.Context, fingerp
 	}
 	fallbackCtx, cancelFallback := context.WithTimeout(ctx, botMediaCandidateQueryTimeout(ctx))
 	defer cancelFallback()
-	var matches []publishProfilePHashDistance
-	var err error
-	if fingerprint.PHash == nil {
-		if exactAlreadyChecked {
-			return nil, nil
-		}
-		matches, err = mediaMD5CandidateMatches(fallbackCtx, fingerprint.MD5, searchScope, nil)
-	} else {
-		matches, err = s.cachedProfileFingerprintCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil, exactAlreadyChecked)
+	if fingerprint == nil || fingerprint.PHash == nil {
+		return nil, nil
 	}
+	matches, err := s.cachedProfileFingerprintCandidates(fallbackCtx, fingerprint, searchIn, searchScope, nil, exactAlreadyChecked)
 	if err != nil {
 		if fallbackCtx.Err() != nil {
 			return nil, gerror.Wrap(fallbackCtx.Err(), "扫图相似查询超时，请稍后重试")

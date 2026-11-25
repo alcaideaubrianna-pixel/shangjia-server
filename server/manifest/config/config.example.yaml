@@ -413,6 +413,7 @@ youbanPublish:
     # 新的实时/历史采集处理直接进入 Redis/Asynq；PostgreSQL Outbox 仅用于
     # 旧版本积压和显式迁移恢复。迁移旧版本积压时临时改为 postgres_outbox。
     processOutboxMode: "redis_first"
+    duplicateMediaReplaceEnabled: true # ENV: YOUBAN_PUBLISH_DUPLICATE_MEDIA_REPLACE_ENABLED
   mediaSearch:
     pgvector:
       enabled: false

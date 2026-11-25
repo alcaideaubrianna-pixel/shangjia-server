@@ -12,6 +12,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
+	"hotgo/internal/dao"
 	iservice "hotgo/internal/service"
 )
 
@@ -25,7 +26,52 @@ const (
 )
 
 func duplicateCollectMediaReplaceEnabled(ctx context.Context) bool {
-	return g.Cfg().MustGet(ctx, "youbanPublish.collect.duplicateMediaReplaceEnabled", false).Bool()
+	return g.Cfg().MustGet(ctx, "youbanPublish.collect.duplicateMediaReplaceEnabled", true).Bool()
+}
+
+func duplicateCollectReplaceOn(ctx context.Context) bool {
+	return duplicateCollectMediaReplaceEnabled(ctx)
+}
+
+func (s *sSysPublish) collectDuplicateProfileRawText(ctx context.Context, tenantID, accountID, profileID int64) (string, error) {
+	if profileID <= 0 {
+		return "", nil
+	}
+	row, err := g.DB().Model(publishCollectDispatchTable+" d").Safe().Ctx(ctx).
+		Fields("e.raw_text").
+		LeftJoin(publishCollectEventTable+" e", "e.id=d.event_id").
+		Where("d.tenant_id", tenantID).Where("d.account_id", accountID).
+		Where("d.profile_id", profileID).WhereNull("d.deleted_at").
+		Where("e.raw_text IS NOT NULL").OrderDesc("d.id").One()
+	if err != nil {
+		return "", gerror.Wrap(err, "读取重复资料原始文案失败")
+	}
+	return strings.TrimSpace(row["raw_text"].String()), nil
+}
+
+func (s *sSysPublish) replaceCollectProfileText(ctx context.Context, profileID int64, event, rule gdb.Record, text string) error {
+	if profileID <= 0 {
+		return gerror.New("重复资料覆盖缺少资料ID")
+	}
+	text = s.normalizeCollectMaterialText(ctx, event, rule, text)
+	if strings.TrimSpace(text) == "" {
+		return gerror.New("重复资料覆盖后的文案为空")
+	}
+	columns := dao.ContentProfile.Columns()
+	metadata, err := s.enrichProfileMetadata(ctx, text)
+	if err != nil {
+		return err
+	}
+	data := g.Map{
+		columns.SourceTextHash: collectHash(text), columns.Title: collectTitle(text),
+		columns.Summary: profileSummary(text), columns.PlainText: text,
+		columns.Province: metadata.Province, columns.City: metadata.City,
+		columns.SourceUpdatedAt: gtime.Now(), columns.UpdatedAt: gtime.Now(),
+	}
+	if _, err = g.DB().Model(dao.ContentProfile.Table()).Ctx(ctx).Where(columns.Id, profileID).WhereNull(columns.DeletedAt).Data(data).Update(); err != nil {
+		return gerror.Wrap(err, "更新重复资料文案失败")
+	}
+	return nil
 }
 
 type duplicateMediaReplaceDecision int

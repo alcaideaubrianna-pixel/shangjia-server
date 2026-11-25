@@ -1266,11 +1266,53 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		return false, "", gerror.New("采集规则未配置目标频道")
 	}
 	fingerprints := buildProfileFingerprints(channelIds, decision.Text, content.Media)
-	hit, findErr := s.findCollectRuleDuplicate(ctx, event, rule, fingerprints)
+	var hit *profileFingerprintDuplicateError
+	var findErr error
+	if collectRuleDedupeEnabled(rule) {
+		if matches, similarityErr := findMediaSimilarityMatches(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), channelIds, content.Media); similarityErr != nil {
+			findErr = similarityErr
+		} else if match, ok := firstMediaSimilarityMatch(matches, 2); ok {
+			hit = &profileFingerprintDuplicateError{ProfileID: match.ProfileID, Layer: "image_lsh"}
+		}
+	}
+	if hit == nil && findErr == nil {
+		hit, findErr = s.findCollectRuleDuplicate(ctx, event, rule, fingerprints)
+	}
 	if findErr != nil {
 		return false, "", findErr
 	}
 	if hit != nil {
+		if hit.Layer == "image_lsh" && duplicateCollectReplaceOn(ctx) {
+			oldText, textErr := s.collectDuplicateProfileRawText(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), hit.ProfileID)
+			if textErr != nil {
+				return false, "", textErr
+			}
+			newText := strings.TrimSpace(event["raw_text"].String())
+			if oldText != "" && oldText != newText {
+				if replaceErr := s.replaceCollectProfileText(ctx, hit.ProfileID, event, rule, decision.Text); replaceErr != nil {
+					return false, "", replaceErr
+				}
+				replaced, replaceErr := s.replaceCollectProfileMedia(ctx, event, content, hit.ProfileID, collectMediaReplaceDuplicate)
+				if replaceErr != nil {
+					return false, "", replaceErr
+				}
+				if !replaced {
+					channels, channelErr := s.profileChannelIdsOrDefaults(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), hit.ProfileID)
+					if channelErr != nil {
+						return false, "", channelErr
+					}
+					meta := telegramProfilePublishMeta{CollectEventId: event["id"].Int64(), CollectSourceId: event["source_id"].Int64(), CollectSourceChatId: strings.TrimSpace(event["source_chat_id"].String()), CollectSourceMessageId: event["source_message_id"].Int64()}
+					if publishErr := s.submitProfilePublishWithMeta(ctx, hit.ProfileID, event["tenant_id"].Int64(), event["account_id"].Int64(), event["account_id"].Int64(), fmt.Sprintf("collect_text_replace:%d", event["id"].Int64()), channels, false, meta); publishErr != nil {
+						return false, "", gerror.Wrap(publishErr, "提交重复资料文案覆盖发布失败")
+					}
+				}
+				if replaced {
+					reason := collectDuplicateReason(hit, true)
+					s.appendCollectEventLogForRecord(ctx, event, "dedupe", "replaced", reason, fmt.Sprintf("rule=%d rawTextChanged=true", rule["id"].Int64()))
+					return true, reason, nil
+				}
+			}
+		}
 		if err = s.recordCollectDuplicateIdentity(ctx, event, rule, hit); err != nil {
 			return false, "", err
 		}
@@ -1388,20 +1430,28 @@ func (s *sSysPublish) findCollectRuleDuplicate(ctx context.Context, event, rule 
 	if !collectRuleDedupeEnabled(rule) {
 		return nil, nil
 	}
+	textFingerprints := make([]profileFingerprint, 0, 1)
+	for _, fingerprint := range fingerprints {
+		if fingerprint.Layer == "text_hash" {
+			textFingerprints = append(textFingerprints, fingerprint)
+		}
+	}
+	if len(textFingerprints) == 0 {
+		return nil, nil
+	}
 	ready, err := profileFingerprintBackfillReady(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !ready && strings.EqualFold(strings.TrimSpace(os.Getenv("YOUBAN_PROFILE_FINGERPRINT_BACKFILL_ENABLED")), "1") {
-		// 只有明确开启全量回填时才等待索引；否则直接使用数据库指纹查询降级，不能阻塞采集入库。
 		return nil, newCollectProcessRetryError(15*time.Second, "资料指纹索引正在初始化")
 	}
-	scoped := scopeCollectProfileFingerprints(collectPublishClientRequestId(event, rule), fingerprints)
+	scoped := scopeCollectProfileFingerprints(collectPublishClientRequestId(event, rule), textFingerprints)
 	hit, err := s.findProfileFingerprintDuplicate(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), event["bot_id"].Int64(), scoped, 0)
 	if err != nil || hit != nil {
 		return hit, err
 	}
-	return s.findLegacyCollectRuleDuplicate(ctx, event, rule, fingerprints)
+	return nil, nil
 }
 
 func collectRuleDedupeEnabled(rule gdb.Record) bool {

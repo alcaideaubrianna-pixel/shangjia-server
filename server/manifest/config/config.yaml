@@ -412,6 +412,8 @@ youbanPublish:
   collect:
     # 新的实时/历史采集处理走 Redis/Asynq，旧 Outbox 积压迁移时临时切换为 postgres_outbox。
     processOutboxMode: "redis_first"
+    # LSH 命中图片但原始文案不同的资料，是否覆盖旧资料并重新上架。
+    duplicateMediaReplaceEnabled: true
   messagePush:
     # 免费用户循环推送的固定间隔天数。
     freeIntervalDays: 9

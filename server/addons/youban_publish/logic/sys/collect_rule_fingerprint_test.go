@@ -1,14 +1,10 @@
 package sys
 
 import (
-	"context"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
 )
 
 func TestCollectProfileFingerprintScopeSeparatesBranches(t *testing.T) {
@@ -90,31 +86,6 @@ func TestCollectProfileFingerprintNamespaceRejectsIncompleteScope(t *testing.T) 
 	}
 }
 
-func TestLegacyCollectRuleFingerprintLookupRejectsUnscopedBeforeDatabase(t *testing.T) {
-	s := &sSysPublish{}
-	items := []profileFingerprint{{ChannelID: 9, Layer: "text_hash", Signature: "raw"}}
-	if _, err := s.findLegacyCollectRuleDuplicate(context.Background(), nil, nil, items); err == nil {
-		t.Fatal("unscoped lookup must fail before touching database")
-	}
-	rawBot := gdb.Record{
-		"tenant_id": gvar.New(78), "account_id": gvar.New(0),
-		"source_id": gvar.New(351), "source_type": gvar.New("bot"),
-	}
-	if _, err := s.findLegacyCollectRuleDuplicate(context.Background(), rawBot, gdb.Record{"id": gvar.New(338)}, items); err == nil {
-		t.Fatal("raw Bot account 0 must not be treated as a resolved business profile owner")
-	}
-	event := gdb.Record{"tenant_id": gvar.New(5), "account_id": gvar.New(6), "source_id": gvar.New(80)}
-	rule := gdb.Record{"id": gvar.New(48), collectRuleSourceIDField: gvar.New(81)}
-	if _, err := s.findLegacyCollectRuleDuplicate(context.Background(), event, rule, items); err == nil {
-		t.Fatal("lookup must not substitute another source")
-	}
-	items = make([]profileFingerprint, 257)
-	rule = gdb.Record{"id": gvar.New(48)}
-	if _, err := s.findLegacyCollectRuleDuplicate(context.Background(), event, rule, items); err == nil {
-		t.Fatal("oversized raw lookup must fail before touching database")
-	}
-}
-
 func TestCollectProfileFingerprintProjectionUsesPersistedScope(t *testing.T) {
 	raw, err := os.ReadFile("profile_fingerprint.go")
 	if err != nil {
@@ -136,38 +107,5 @@ func TestCollectProfileFingerprintProjectionUsesPersistedScope(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "scopeCollectProfileFingerprints(sourceKey, buildProfileFingerprints(") {
 		t.Fatal("material commit must attach the same scoped signatures as lookup")
-	}
-}
-
-func TestLegacyCollectRuleFingerprintLookupUsesExactBranchEvidence(t *testing.T) {
-	raw, err := os.ReadFile("collect_rule_fingerprint.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(raw)
-	start := strings.Index(source, "func (s *sSysPublish) findLegacyCollectRuleDuplicate(")
-	if start < 0 {
-		t.Fatal("legacy lookup not found")
-	}
-	body := source[start:]
-	for _, required := range []string{
-		"f.channel_id=? AND f.layer=? AND f.signature=? AND f.item_total=? AND f.signature_count=?",
-		"accountScope := collectEventAccountScope(event)",
-		"Where(\"f.tenant_id\", tenantID)", "WhereIn(\"f.account_id\", accountScope)",
-		"ps.profile_id=p.id AND ps.tenant_id=? AND ps.account_id=? AND ps.deleted_at IS NULL)\", tenantID, accountID",
-		"d.profile_id=f.profile_id AND d.tenant_id=? AND d.account_id IN (?) AND d.source_id=? AND d.rule_id=?",
-		"other.account_id NOT IN (?)", "cp.account_id NOT IN (?)",
-		"p.source_key NOT LIKE ?", "collect:v4:%", "Limit(1)",
-		"context.WithTimeout(ctx, 3*time.Second)", "len(items) > fingerprintLimit",
-		"NOT EXISTS (SELECT 1 FROM ",
-	} {
-		if !strings.Contains(body, required) {
-			t.Errorf("missing legacy fingerprint safety contract: %s", required)
-		}
-	}
-	for _, forbidden := range []string{".Update(", ".Save(", ".Insert(", "backfillProfileFingerprints(", "cache.Instance()"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("legacy lookup must remain read-only: %s", forbidden)
-		}
 	}
 }

@@ -106,7 +106,6 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			`CREATE TEMP TABLE hg_youban_publish_note_index(profile_id bigint,tenant_id bigint,account_id bigint,status int,visibility int,deleted_at timestamp) ON COMMIT DROP`,
 
 			`CREATE TEMP TABLE hg_youban_publish_media(id bigserial PRIMARY KEY,tenant_id bigint,account_id bigint,profile_id bigint,media_type text,perceptual_hash text,md5 text,processing_status text,deleted_at timestamp) ON COMMIT DROP`,
-			`CREATE TEMP TABLE hg_youban_publish_media_fingerprint(media_id bigint PRIMARY KEY,tenant_id bigint,account_id bigint,profile_id bigint,media_type text,phash_bits bit(64),md5 text,updated_at timestamp,deleted_at timestamp) ON COMMIT DROP`,
 		}
 		for _, table := range []string{publishMediaPHashBucketTable, publishMediaPHashLshTable, publishMediaPHashAliasBucketTable} {
 			valueType, extra, key := "integer", "", "media_id,bucket_pos"
@@ -134,13 +133,6 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			id, err := service.saveMediaRecordAndIndex(ctx, g.Map{"tenant_id": 5, "account_id": 6, "profile_id": 101, "media_type": "image", "perceptual_hash": "1234567890abcdef", "md5": "0123456789abcdef0123456789abcdef"}, "保存测试媒体失败")
 			if err != nil {
 				t.Fatal(err)
-			}
-			row, err := tx.Ctx(ctx).Model("hg_youban_publish_media_fingerprint").Where("media_id", id).One()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if row["md5"].String() != "0123456789abcdef0123456789abcdef" {
-				t.Fatalf("lost original MD5: %v", row)
 			}
 			if _, err = tx.Ctx(ctx).Exec("DELETE FROM "+publishMediaPHashLshTable+" WHERE media_id=?", id); err != nil {
 				t.Fatal(err)
@@ -198,7 +190,7 @@ func TestMediaSearchStorageLocalPostgres(t *testing.T) {
 			if _, err = service.saveMediaDataAndIndex(ctx, id, g.Map{"perceptual_hash": ""}, "更新测试媒体失败"); err != nil {
 				t.Fatal(err)
 			}
-			for _, table := range []string{publishMediaPHashBucketTable, publishMediaPHashLshTable, "hg_youban_publish_media_fingerprint"} {
+			for _, table := range []string{publishMediaPHashBucketTable, publishMediaPHashLshTable} {
 				n, err := tx.Ctx(ctx).Model(table).Where("media_id", id).Count()
 				if err != nil || n != 0 {
 					t.Fatalf("stale index remained table=%s rows=%d err=%v", table, n, err)

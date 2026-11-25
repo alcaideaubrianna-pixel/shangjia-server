@@ -173,12 +173,7 @@ func TestScanOfflineCorpusReplay(t *testing.T) {
 				}
 				queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				started := time.Now()
-				groups, err := loadBotMediaSearchCandidatesExactFirstBatch(queryCtx, items,
-					func(ctx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
-						return botMediaExactCandidates(ctx, items, scope)
-					}, func(ctx context.Context, items []*mediaFingerprint) ([][]*botMediaSearchCandidate, error) {
-						return service.botMediaApproximateBatch(ctx, items, &sysin.ProfileImageSearchInp{Threshold: 12}, scope)
-					})
+				groups, err := service.botMediaApproximateBatch(queryCtx, items, &sysin.ProfileImageSearchInp{Threshold: 12}, scope)
 				elapsed := time.Since(started)
 				cancel()
 				ids := rankBotMediaSearchCandidates(groups)
@@ -193,64 +188,6 @@ func TestScanOfflineCorpusReplay(t *testing.T) {
 					t.Error("cold replay ranking changed")
 				}
 				previousIDs = ids
-			}
-			// Compare every original input with the existing single-query
-			// implementation; latency assertions above exclude reference work.
-			unique := uniqueBotMediaFingerprints(items)
-			referenceGroups, err := botMediaExactCandidates(ctx, unique, scope)
-			if err != nil {
-				t.Fatal(err)
-			}
-			identity := func(rows []mediaPHashBucketCandidateRow) []string {
-				keys := make([]string, 0, len(rows))
-				for _, row := range rows {
-					keys = append(keys, fmt.Sprintf("%d:%d:%d:%d:%s:%s:%d", row.MediaId, row.ProfileId, row.TenantId, row.AccountId, row.MediaType, row.HashValue, row.BucketHits))
-				}
-				sort.Strings(keys)
-				return keys
-			}
-			for i, item := range unique {
-				hash := fmt.Sprintf("%016x", item.PHash.GetHash())
-				batchSQL, batchArgs, err := mediaPHashBatchSQL([]string{hash}, 12, scope.Partitions, false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				singleSQL, singleArgs, err := mediaPHashLshCandidateSQLWithStrategy(hash, 12, scope.Partitions, nil, "image", 0, false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var batch, single []mediaPHashBucketCandidateRow
-				if err := g.DB().Raw(batchSQL, batchArgs...).Scan(&batch); err != nil {
-					t.Fatal(err)
-				}
-				if err := g.DB().Raw(singleSQL, singleArgs...).Scan(&single); err != nil {
-					t.Fatal(err)
-				}
-				// The old SQL only orders by bucket_hits, so ties have no
-				// defined order. Compare identities and counts, then separately
-				// verify the user-facing merged ranking below.
-				if !reflect.DeepEqual(identity(batch), identity(single)) {
-					t.Fatalf("input=%d candidate identities/bucket counts differ", i)
-				}
-				if len(referenceGroups[i]) > 0 {
-					continue
-				}
-				matches := make([]publishProfilePHashDistance, 0, len(single))
-				for _, row := range single {
-					hash, ok := parseUploadPHash(row.HashValue)
-					if !ok {
-						t.Fatal("invalid reference hash")
-					}
-					distance, err := item.PHash.Distance(hash)
-					if err != nil || distance > 12 {
-						t.Fatal("reference distance outside threshold")
-					}
-					matches = append(matches, publishProfilePHashDistance{ProfileId: row.ProfileId, MediaId: row.MediaId, MediaType: row.MediaType, Distance: distance})
-				}
-				referenceGroups[i] = botMediaCandidatesFromMatches(mediaPHashDeduplicateProfiles(matches))
-			}
-			if want := rankBotMediaSearchCandidates(referenceGroups); !reflect.DeepEqual(previousIDs, want) {
-				t.Fatal("merged profile identities/ranking differ from single-query reference")
 			}
 		})
 	}

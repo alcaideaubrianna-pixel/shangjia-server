@@ -2,18 +2,10 @@ package sys
 
 import (
 	"context"
-	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-)
-
-const (
-	// Candidate recall stays within the indexed LSH range. The wider threshold is
-	// only applied to the small candidate set during the final one-to-one match.
-	collectProfilePHashCandidateThreshold = 12
-	collectProfilePHashDuplicateThreshold = 20
 )
 
 type profilePHashSetRow struct {
@@ -21,59 +13,7 @@ type profilePHashSetRow struct {
 	PerceptualHash string `orm:"perceptual_hash"`
 }
 
-// findCollectProfilePHashDuplicate uses the existing pHash bucket/LSH index
-// for recall and only accepts a candidate when its complete display image set
-// can be matched one-to-one with the incoming set.
-func (s *sSysPublish) findCollectProfilePHashDuplicate(ctx context.Context, tenantId, accountId int64, channelIds []int64, media []collectMediaItem) (int64, error) {
-	sourceHashes := collectDisplayPHashes(media)
-	if len(sourceHashes) == 0 {
-		return 0, nil
-	}
-	scopes := []mediaPHashBucketScopePart{{TenantId: tenantId, AccountIds: []int64{accountId}}}
-	candidateIds := make(map[int64]struct{})
-	for _, value := range sourceHashes {
-		rows, err := mediaPHashBucketCandidateRowsWithScopes(ctx, value, collectProfilePHashCandidateThreshold, scopes, nil, "image", 0)
-		if err != nil {
-			return 0, err
-		}
-		for _, row := range rows {
-			candidateIds[row.ProfileId] = struct{}{}
-		}
-	}
-	if len(candidateIds) == 0 {
-		return 0, nil
-	}
-	ids := make([]int64, 0, len(candidateIds))
-	for id := range candidateIds {
-		ids = append(ids, id)
-	}
-	if len(channelIds) > 0 {
-		scopedIds, err := duplicateProfileIdsInChannels(ctx, ids, channelIds)
-		if err != nil {
-			return 0, err
-		}
-		ids = uniqueIds(scopedIds)
-	}
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	rows, err := duplicateProfilePHashRows(ctx, ids)
-	if err != nil {
-		return 0, err
-	}
-	byProfile := make(map[int64][]string, len(ids))
-	for _, row := range rows {
-		byProfile[row.ProfileId] = append(byProfile[row.ProfileId], strings.ToLower(strings.TrimSpace(row.PerceptualHash)))
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
-	for _, id := range ids {
-		if profilePHashSetsMatch(sourceHashes, byProfile[id], collectProfilePHashDuplicateThreshold) {
-			return id, nil
-		}
-	}
-	return 0, nil
-}
-
+// Shared helpers for the unified media similarity service.
 func duplicateProfileIdsInChannels(ctx context.Context, profileIds, channelIds []int64) ([]int64, error) {
 	profileIds, channelIds = uniqueIds(profileIds), uniqueIds(channelIds)
 	result := make([]int64, 0)

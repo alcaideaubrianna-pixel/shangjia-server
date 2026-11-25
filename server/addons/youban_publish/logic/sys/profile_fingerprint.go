@@ -49,24 +49,24 @@ func (e *profileFingerprintDuplicateError) Error() string {
 }
 
 func buildProfileFingerprints(channelIDs []int64, finalText string, media []collectMediaItem) []profileFingerprint {
+	_ = media
 	normalizedText := normalizeCollectText(normalizeCollectKeywordText(finalText))
-	material := collectDedupeMaterialFromItems(collectHash(normalizedText), media)
-	// Keep text_hash first: collection dedupe should short-circuit on identical
-	// normalized text in the same channel before consulting exact media layers.
-	signatures := material.signatures(true)
+	textHash := collectHash(normalizedText)
+	if strings.TrimSpace(textHash) == collectHash("") {
+		return nil
+	}
 	channelIDs = uniqueIds(channelIDs)
 	sort.Slice(channelIDs, func(i, j int) bool { return channelIDs[i] < channelIDs[j] })
-	result := make([]profileFingerprint, 0, len(channelIDs)*len(signatures))
+	result := make([]profileFingerprint, 0, len(channelIDs))
 	for _, channelID := range channelIDs {
 		if channelID <= 0 {
 			continue
 		}
-		for _, signature := range signatures {
-			result = append(result, profileFingerprint{
-				ChannelID: channelID, Layer: signature.layer, Signature: signature.value,
-				ItemTotal: signature.total, SignatureCount: signature.count,
-			})
-		}
+		result = append(result, profileFingerprint{
+			ChannelID: channelID,
+			Layer:     "text_hash",
+			Signature: textHash,
+		})
 	}
 	return result
 }
