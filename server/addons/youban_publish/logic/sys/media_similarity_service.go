@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -27,7 +28,22 @@ type mediaSimilarityMatch struct {
 // findMediaSimilarityMatches performs LSH recall, scope filtering, and
 // one-to-one perceptual matching in one place. Callers decide what a match
 // means for their business flow.
-func findMediaSimilarityMatches(ctx context.Context, tenantID, accountID int64, channelIDs []int64, media []collectMediaItem) ([]mediaSimilarityMatch, error) {
+func findMediaSimilarityMatches(ctx context.Context, tenantID, accountID int64, channelIDs []int64, media []collectMediaItem) (matches []mediaSimilarityMatch, err error) {
+	startedAt := time.Now()
+	candidateRows := 0
+	metricResult := "none"
+	defer func() {
+		matchedImages := 0
+		for _, match := range matches {
+			matchedImages += match.MatchedCount
+		}
+		if err != nil {
+			metricResult = "error"
+		} else if len(matches) > 0 {
+			metricResult = "matched"
+		}
+		observeCollectDedupeLSH(ctx, time.Since(startedAt), candidateRows, len(matches), matchedImages, metricResult)
+	}()
 	sourceHashes := collectDisplayPHashes(media)
 	if len(sourceHashes) == 0 {
 		return nil, nil
@@ -39,6 +55,7 @@ func findMediaSimilarityMatches(ctx context.Context, tenantID, accountID int64, 
 		if err != nil {
 			return nil, err
 		}
+		candidateRows += len(rows)
 		for _, row := range rows {
 			candidateIDs[row.ProfileId] = struct{}{}
 		}

@@ -1279,7 +1279,13 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		hit, findErr = s.findCollectRuleDuplicate(ctx, event, rule, fingerprints)
 	}
 	if findErr != nil {
+		observeCollectDedupeDecision(ctx, "error")
 		return false, "", findErr
+	}
+	if hit != nil {
+		observeCollectDedupeDecision(ctx, "duplicate")
+	} else {
+		observeCollectDedupeDecision(ctx, "unique")
 	}
 	if hit != nil {
 		if hit.Layer == "image_lsh" && duplicateCollectReplaceOn(ctx) {
@@ -1307,8 +1313,15 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 					}
 				}
 				if replaced {
+					observeCollectDedupeReplacement(ctx, "media_and_text")
 					reason := collectDuplicateReason(hit, true)
 					s.appendCollectEventLogForRecord(ctx, event, "dedupe", "replaced", reason, fmt.Sprintf("rule=%d rawTextChanged=true", rule["id"].Int64()))
+					return true, reason, nil
+				}
+				if !replaced {
+					observeCollectDedupeReplacement(ctx, "text_only")
+					reason := collectDuplicateReason(hit, true)
+					s.appendCollectEventLogForRecord(ctx, event, "dedupe", "replaced", reason, fmt.Sprintf("rule=%d rawTextChanged=true mediaChanged=false", rule["id"].Int64()))
 					return true, reason, nil
 				}
 			}
