@@ -219,6 +219,7 @@ func (s *sSysPublish) CollectRuleSave(ctx context.Context, in *sysin.CollectRule
 		"global_enabled":     switchInt(in.GlobalEnabled),
 		"review_enabled":     switchInt(in.ReviewEnabled),
 		"dedupe_enabled":     switchDefaultOn(in.DedupeEnabled),
+		"duplicate_media_replace_enabled": switchDefaultOn(in.DuplicateMediaReplaceEnabled),
 		"dedupe_days":        in.DedupeDays,
 		"full_match_enabled": switchInt(in.FullMatchEnabled),
 		"block_link":         switchDefaultOn(in.BlockLink),

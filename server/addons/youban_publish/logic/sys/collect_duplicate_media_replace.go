@@ -29,7 +29,10 @@ func duplicateCollectMediaReplaceEnabled(ctx context.Context) bool {
 	return g.Cfg().MustGet(ctx, "youbanPublish.collect.duplicateMediaReplaceEnabled", true).Bool()
 }
 
-func duplicateCollectReplaceOn(ctx context.Context) bool {
+func duplicateCollectReplaceOn(ctx context.Context, rule gdb.Record) bool {
+	if value := rule["duplicate_media_replace_enabled"]; value != nil {
+		return value.Int() == 1
+	}
 	return duplicateCollectMediaReplaceEnabled(ctx)
 }
 

@@ -20,6 +20,7 @@ type YoubanPublishCollectRule struct {
 	BackupChannelId      int64       `json:"backupChannelId"      orm:"backup_channel_id"       description:"备份群ID"`
 	ReviewEnabled        int         `json:"reviewEnabled"        orm:"review_enabled"          description:"是否需要审核"`
 	DedupeEnabled        int         `json:"dedupeEnabled"        orm:"dedupe_enabled"          description:"是否图文去重"`
+	DuplicateMediaReplaceEnabled int `json:"duplicateMediaReplaceEnabled" orm:"duplicate_media_replace_enabled" description:"是否重复资料覆盖"`
 	DedupeDays           int         `json:"dedupeDays"           orm:"dedupe_days"             description:"去重天数"`
 	KeywordJson          string      `json:"keywordJson"          orm:"keyword_json"            description:"关键词JSON"`
 	TagJson              string      `json:"tagJson"              orm:"tag_json"                description:"标签JSON"`

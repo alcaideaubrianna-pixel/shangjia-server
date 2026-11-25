@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_rule` (
   `global_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否全局应用',
   `review_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否需要审核',
   `dedupe_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否图文去重',
+  `duplicate_media_replace_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否重复资料覆盖',
   `dedupe_days` int(11) NOT NULL DEFAULT '7' COMMENT '去重天数',
   `full_match_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '全量匹配',
   `block_link` tinyint(1) NOT NULL DEFAULT '1' COMMENT '屏蔽链接',

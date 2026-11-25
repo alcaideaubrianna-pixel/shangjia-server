@@ -306,6 +306,7 @@ type CollectRuleModel struct {
 	TargetChannelNames      []string                  `json:"targetChannelNames" dc:"目标频道名称"`
 	ReviewEnabled           int                       `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled           int                       `json:"dedupeEnabled" dc:"去重开关"`
+	DuplicateMediaReplaceEnabled int                  `json:"duplicateMediaReplaceEnabled" dc:"重复资料覆盖开关"`
 	DedupeDays              int                       `json:"dedupeDays" dc:"去重天数"`
 	FullMatchEnabled        int                       `json:"fullMatchEnabled" dc:"全量匹配"`
 	Keywords                []string                  `json:"keywords" dc:"关键词"`
@@ -337,6 +338,7 @@ type CollectRuleSaveInp struct {
 	TargetChannelIds        []int64                   `json:"targetChannelIds" dc:"目标频道ID"`
 	ReviewEnabled           int                       `json:"reviewEnabled" dc:"审核开关"`
 	DedupeEnabled           int                       `json:"dedupeEnabled" dc:"去重开关"`
+	DuplicateMediaReplaceEnabled int                  `json:"duplicateMediaReplaceEnabled" dc:"重复资料覆盖开关"`
 	DedupeDays              int                       `json:"dedupeDays" dc:"去重天数"`
 	FullMatchEnabled        int                       `json:"fullMatchEnabled" dc:"全量匹配"`
 	Keywords                []string                  `json:"keywords" dc:"关键词"`

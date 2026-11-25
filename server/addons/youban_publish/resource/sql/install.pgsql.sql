@@ -1340,6 +1340,7 @@ CREATE TABLE IF NOT EXISTS "hg_youban_publish_collect_rule" (
   "global_enabled" smallint NOT NULL DEFAULT 0,
   "review_enabled" smallint NOT NULL DEFAULT 0,
   "dedupe_enabled" smallint NOT NULL DEFAULT 1,
+  "duplicate_media_replace_enabled" smallint NOT NULL DEFAULT 1,
   "dedupe_days" integer NOT NULL DEFAULT 7,
   "full_match_enabled" smallint NOT NULL DEFAULT 0,
   "block_link" smallint NOT NULL DEFAULT 1,

@@ -31,6 +31,7 @@ type YoubanPublishCollectRuleColumns struct {
 	BackupChannelId      string // 备份群ID
 	ReviewEnabled        string // 是否需要审核
 	DedupeEnabled        string // 是否图文去重
+	DuplicateMediaReplaceEnabled string // 是否重复资料覆盖
 	DedupeDays           string // 去重天数
 	KeywordJson          string // 关键词JSON
 	TagJson              string // 标签JSON
@@ -67,6 +68,7 @@ var youbanPublishCollectRuleColumns = YoubanPublishCollectRuleColumns{
 	BackupChannelId:      "backup_channel_id",
 	ReviewEnabled:        "review_enabled",
 	DedupeEnabled:        "dedupe_enabled",
+	DuplicateMediaReplaceEnabled: "duplicate_media_replace_enabled",
 	DedupeDays:           "dedupe_days",
 	KeywordJson:          "keyword_json",
 	TagJson:              "tag_json",

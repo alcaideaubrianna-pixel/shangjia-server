@@ -1288,7 +1288,7 @@ func (s *sSysPublish) dispatchCollectEventByRule(ctx context.Context, event gdb.
 		observeCollectDedupeDecision(ctx, "unique")
 	}
 	if hit != nil {
-		if hit.Layer == "image_lsh" && duplicateCollectReplaceOn(ctx) {
+		if hit.Layer == "image_lsh" && duplicateCollectReplaceOn(ctx, rule) {
 			oldText, textErr := s.collectDuplicateProfileRawText(ctx, event["tenant_id"].Int64(), event["account_id"].Int64(), hit.ProfileID)
 			if textErr != nil {
 				return false, "", textErr

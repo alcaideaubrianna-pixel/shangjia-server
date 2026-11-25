@@ -1103,3 +1103,5 @@ CREATE TABLE IF NOT EXISTS `hg_youban_publish_collect_identity` (
   KEY `idx_ybp_collect_identity_profile` (`tenant_id`,`account_id`,`source_id`,`rule_id`,`profile_id`),
   KEY `idx_ybp_collect_identity_canonical` (`tenant_id`,`account_id`,`source_id`,`rule_id`,`canonical_event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE `hg_youban_publish_collect_rule`
+  ADD COLUMN IF NOT EXISTS `duplicate_media_replace_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否重复资料覆盖' AFTER `dedupe_enabled`;

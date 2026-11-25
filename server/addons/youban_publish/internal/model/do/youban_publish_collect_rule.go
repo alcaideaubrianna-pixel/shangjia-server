@@ -22,6 +22,7 @@ type YoubanPublishCollectRule struct {
 	BackupChannelId      any         // 备份群ID
 	ReviewEnabled        any         // 是否需要审核
 	DedupeEnabled        any         // 是否图文去重
+	DuplicateMediaReplaceEnabled any // 是否重复资料覆盖
 	DedupeDays           any         // 去重天数
 	KeywordJson          any         // 关键词JSON
 	TagJson              any         // 标签JSON

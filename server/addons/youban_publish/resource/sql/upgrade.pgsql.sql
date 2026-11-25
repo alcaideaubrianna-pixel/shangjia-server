@@ -1551,3 +1551,5 @@ CREATE INDEX IF NOT EXISTS "idx_ybp_collect_identity_profile" ON "hg_youban_publ
 CREATE INDEX IF NOT EXISTS "idx_ybp_collect_identity_canonical" ON "hg_youban_publish_collect_identity" ("tenant_id","account_id","source_id","rule_id","canonical_event_id");
 
 CREATE INDEX IF NOT EXISTS idx_ybp_collect_identity_event ON hg_youban_publish_collect_identity (event_id, tenant_id, source_id);
+ALTER TABLE "hg_youban_publish_collect_rule"
+  ADD COLUMN IF NOT EXISTS "duplicate_media_replace_enabled" smallint NOT NULL DEFAULT 1;
