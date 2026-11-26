@@ -2,9 +2,9 @@ package sys
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
@@ -58,41 +58,48 @@ func wakeTelegramChannelOrderOwner(ctx context.Context, job telegramJobRecord) (
 	return woken, nil
 }
 
-func telegramChannelPendingCleanupSQL(alias string) string {
-	p := ""
-	if alias != "" {
-		p = strings.TrimSuffix(alias, ".") + "."
-	}
-	// A pending cleanup marker stays durable until the cleanup worker resolves it.
-	// Send admission narrows terminal cleanup to the same profile.
-	return fmt.Sprintf("((%stimeout_cleanup_at IS NOT NULL AND %sstatus NOT IN ('sent','superseded','failed')) OR (%ssend_phase='cleanup_processing' AND %sstatus NOT IN ('sent','failed','superseded')))", p, p, p, p)
+func telegramChannelPendingCleanupCondition(model *gdb.Model, alias string) *gdb.WhereBuilder {
+	cleanupStarted := model.Builder().
+		WherePrefixNotNull(alias, "timeout_cleanup_at").
+		WherePrefixNotIn(alias, "status", []string{"sent", "superseded", "failed"})
+	cleanupProcessing := model.Builder().
+		WherePrefix(alias, "send_phase", "cleanup_processing").
+		WherePrefixNotIn(alias, "status", []string{"sent", "failed", "superseded"})
+	return model.Builder().Where(cleanupStarted).WhereOr(cleanupProcessing)
 }
 
-func telegramChannelStartedJobSQL(alias string) string {
-	p := ""
-	if alias != "" {
-		p = strings.TrimSuffix(alias, ".") + "."
+func telegramChannelStartedJobCondition(model *gdb.Model, alias string) *gdb.Model {
+	phases := []string{
+		"display_sending", "display_confirmed", "display_confirming",
+		"verify_sending", "verify_confirming",
+		"cleanup_sending", "cleanup_confirming",
 	}
-	return "(" +
-		telegramChannelPendingCleanupSQL(alias) +
-		" OR " + p + "status IN ('sending','confirming','unknown','reconciling')" +
-		" OR (" + p + "status='pending' AND " + p + "send_phase IN " +
-		"('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming'))" +
-		" OR (" + p + "status='failed_retry' AND (" + p + "next_retry_at IS NULL OR " +
-		p + "next_retry_at<=CURRENT_TIMESTAMP) AND " + p + "dispatch_status IN ('','idle') AND " +
-		p + "send_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming')))"
+	statuses := []string{"sending", "confirming", "unknown", "reconciling"}
+	cleanup := telegramChannelPendingCleanupCondition(model, alias)
+	inFlight := model.Builder().WherePrefixIn(alias, "status", statuses)
+	pending := model.Builder().
+		WherePrefix(alias, "status", "pending").
+		WherePrefixIn(alias, "send_phase", phases)
+	retry := model.Builder().
+		WherePrefix(alias, "status", "failed_retry").
+		WherePrefixIn(alias, "dispatch_status", []string{"", "idle"}).
+		WherePrefixIn(alias, "send_phase", phases)
+	retry = retry.Where(
+		retry.Builder().
+			WherePrefixNull(alias, "next_retry_at").
+			WhereOrPrefixLTE(alias, "next_retry_at", gdb.Raw("CURRENT_TIMESTAMP")),
+	)
+	return model.Where(cleanup).WhereOr(inFlight).WhereOr(pending).WhereOr(retry)
 }
 
-func telegramChannelOrderScopeSQL(alias string, job telegramJobRecord) (string, []interface{}) {
-	p := ""
-	if alias != "" {
-		p = alias + "."
-	}
+func telegramChannelApplyOrderScope(model *gdb.Model, alias string, job telegramJobRecord) *gdb.Model {
 	if strings.TrimSpace(job.TargetChatId) != "" {
-		return p + "target_chat_id IN (?)", []interface{}{telegramChannelChatIDVariants(job.TargetChatId)}
+		return model.WherePrefixIn(alias, "target_chat_id", telegramChannelChatIDVariants(job.TargetChatId))
 	}
-	return fmt.Sprintf("(%stenant_id=? AND %schannel_id=? AND %saccount_id=?)", p, p, p),
-		[]interface{}{job.TenantId, job.ChannelId, job.AccountId}
+	return model.
+		WherePrefix(alias, "tenant_id", job.TenantId).
+		WherePrefix(alias, "channel_id", job.ChannelId).
+		WherePrefix(alias, "account_id", job.AccountId)
 }
 
 func telegramChannelJobPendingCleanup(job telegramJobRecord) bool {
@@ -127,26 +134,46 @@ func (s *sSysPublish) telegramChannelHasStartedOwner(ctx context.Context, job te
 	}
 	ctx, cancel := context.WithTimeout(ctx, telegrambudget.LeaseOperation(ctx))
 	defer cancel()
-	scope, args := telegramChannelOrderScopeSQL("j", job)
 	model := g.DB().Model(publishTgJobTable+" j").Safe().Ctx(ctx).Master().Unscoped().
-		Where("j.id <> ?", job.Id).Where(scope, args...)
+		WhereNot("j.id", job.Id)
+	model = telegramChannelApplyOrderScope(model, "j", job)
 	if telegramJobPriorityValue(job) <= tgJobPriorityInteractive {
 		// Manual, AI and bot publishing is already admitted to the foreground
 		// Redis lane. Historical/cycle pending work must not turn that lane into
 		// a channel-wide wait queue; only a real in-flight send or cleanup for
 		// the same profile can block it.
-		model = model.Where(
-			"(j.status IN ('sending','confirming','unknown','reconciling') OR "+
-				"(j.profile_id=? AND j.status NOT IN ('sent','failed','superseded') AND ("+telegramChannelPendingCleanupSQL("j")+" OR "+
-				"j.send_phase IN ('display_sending','display_confirmed','display_confirming','verify_sending','verify_confirming','cleanup_sending','cleanup_confirming'))))",
-			job.ProfileId,
-		)
+		sameProfile := model.Builder().
+			WherePrefix("j", "profile_id", job.ProfileId).
+			WherePrefixNotIn("j", "status", []string{"sent", "failed", "superseded"}).
+			Where(telegramChannelPendingCleanupCondition(model, "j"))
+		sameProfileOrPhase := model.Builder().
+			WherePrefix("j", "profile_id", job.ProfileId).
+			WherePrefixNotIn("j", "status", []string{"sent", "failed", "superseded"}).
+			WherePrefixIn("j", "send_phase", []string{
+				"display_sending", "display_confirmed", "display_confirming",
+				"verify_sending", "verify_confirming",
+				"cleanup_sending", "cleanup_confirming",
+			})
+		model = model.
+			WherePrefixIn("j", "status", []string{"sending", "confirming", "unknown", "reconciling"}).
+			WhereOr(sameProfile).
+			WhereOr(sameProfileOrPhase)
 	} else {
-		model = model.Where(telegramChannelStartedJobSQL("j")).
-			Where("(j.status NOT IN ('sent','failed','superseded') OR (j.profile_id > 0 AND j.profile_id = ?))", job.ProfileId)
+		model = telegramChannelStartedJobCondition(model, "j").
+			Where(
+				model.Builder().
+					WherePrefixNotIn("j", "status", []string{"sent", "failed", "superseded"}).
+					WhereOr(
+						model.Builder().
+							WherePrefixGT("j", "profile_id", 0).
+							WherePrefix("j", "profile_id", job.ProfileId),
+					),
+			)
 	}
 	if telegramChannelJobOwnsOrder(job) {
-		model = model.Where("("+telegramChannelPendingCleanupSQL("j")+" OR j.id < ?)", job.Id)
+		model = model.
+			Where(telegramChannelPendingCleanupCondition(model, "j")).
+			WhereLT("j.id", job.Id)
 	}
 	row, err := model.Fields("j.id,j.status,j.send_phase,j.timeout_cleanup_at").Limit(1).One()
 	if err != nil {
